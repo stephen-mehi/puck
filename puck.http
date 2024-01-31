@@ -1,0 +1,6 @@
+@puck_HostAddress = http://localhost:5135
+
+GET {{puck_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
