@@ -1,11 +1,12 @@
-using Rox.Common.Abstractions.Algorithms;
-using Rox.Common.Abstractions.IndustrialProtocols;
-using Rox.Common.Algorithms;
-using Rox.Common.IndustrialProtocols;
+using NModbus;
+using NModbus.Extensions.Enron;
+using NModbus.IO;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Net.Sockets;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -34,20 +35,20 @@ namespace Rox.Drivers.Phoenix
 
     public abstract class PhoenixIOModuleBase
     {
-        protected readonly IModBusService _modbusServ;
+        protected readonly IModbusMaster _modbusServ;
         protected readonly ushort _startAddress;
         protected readonly ushort _endAddress;
         protected readonly ushort _wordCount;
 
         public PhoenixIOModuleBase(
-            IModBusService modbusServ,
+            IModbusMaster modbusMaster,
             ushort startAddress,
             ushort wordCount)
         {
             _wordCount = wordCount;
             _endAddress = (ushort)(startAddress + wordCount - 1);
             _startAddress = startAddress;
-            _modbusServ = modbusServ;
+            _modbusServ = modbusMaster;
         }
     }
 
@@ -61,10 +62,10 @@ namespace Rox.Drivers.Phoenix
         protected readonly ushort _bitCount;
 
         public PhoenixDigitalModuleBase(
-            IModBusService modbusServ,
+            IModbusMaster modbusMaster,
             ushort startAddress,
             ushort bitCount,
-            ushort wordCount) : base(modbusServ, startAddress, wordCount)
+            ushort wordCount) : base(modbusMaster, startAddress, wordCount)
         {
             _bitCount = bitCount;
         }
@@ -107,18 +108,13 @@ namespace Rox.Drivers.Phoenix
 
     public class PhoenixDigitalInputModule : PhoenixDigitalModuleBase, IDigitalInputModule
     {
-
-        protected readonly IWordUtilities _bitHelper;
-
         public PhoenixDigitalInputModule(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusMaster,
             ushort startAddress,
             ushort bitCount,
             ushort wordCount)
-            : base(modbusServ, startAddress, bitCount, wordCount)
+            : base(modbusMaster, startAddress, bitCount, wordCount)
         {
-            _bitHelper = bitHelper;
         }
 
         protected void ValidateIndex(ushort index)
@@ -134,50 +130,59 @@ namespace Rox.Drivers.Phoenix
         public async Task<IReadOnlyDictionary<ushort, bool>> ReadManyAsync(IEnumerable<ushort> indexes, CancellationToken ct = default)
         {
             var indexHash = new HashSet<ushort>(indexes);
-            var registers = (await _modbusServ.ReadRegistersAsync(_startAddress, _wordCount, ct).ConfigureAwait(false)).ToList();
-            var state =
-                registers
-                //order so we process them in proper sequence
-                .OrderByDescending(r => r.Address)
-                .SelectMany(r =>
+
+            //READ ALL REGISTERS FOR THIS MODULE
+            var regVals =
+                (await _modbusServ.ReadInputRegistersAsync(0, _startAddress, _wordCount)
+                .ConfigureAwait(false));
+
+            var stateMap = new Dictionary<ushort, bool>();
+
+            for (int i = 0; i < regVals.Length; i++)
+            {
+                var currentAddress = _startAddress + i;
+                int upstreamBitCount = (_endAddress - currentAddress) * 16;
+
+                for (int j = 0; j < 16; j++)
                 {
-                    //get bit string, msb first
-                    var bits = _bitHelper.GetBitsMsbFirst(r.Value).ToList();
-                    var states = new Dictionary<ushort, bool>();
-                    ushort upstreamAddressBits = GetUpstreamBits(_endAddress, r.Address);
+                    //CALCULATE REQUESTED 1-BASED INDEX REPRESENTATION
+                    ushort index = (ushort)(upstreamBitCount + j + 1);
 
-                    //iterate over bits
-                    for (int i = 0; i < bits.Count; i++)
+                    //only handle ones we care about
+                    if (indexHash.Contains(index))
                     {
-                        ushort index = (ushort)(upstreamAddressBits + i + 1);
-                        //only handle ones we care about
-                        if (indexHash.Contains(index))
-                            //16-i since bits are in reverse order from io indexing
-                            states.Add(index, bits[16 - i - 1]);
+                        //shift to correct bit, isolate, and see if high or low
+                        //phoenix input 0 maps to LSB i.e. bit 0 
+                        bool state = ((regVals[i] >> j) & 1) == 1;
+                        stateMap.Add(index, state);
                     }
+                }
+            }
 
-                    return states;
-                })
-                .ToDictionary(x => x.Key, x => x.Value);
-
-            return state;
+            return stateMap;
         }
 
         public async Task<bool> ReadAsync(ushort ioIndex, CancellationToken ct = default)
         {
-            ValidateIndex(ioIndex);
+            if (ioIndex < 1 || ioIndex > _bitCount)
+                throw new ArgumentOutOfRangeException($"Failed to validate input index. Specified index was outside of allowed range of 1-{_bitCount}");
+
+            //register addresses decrease as io index increases
+            //This is reversed from the expected mapping of io indexes onto register addresses
+            //given 1-based io index 16 and end address 5, target address is 5
+            ushort targetAddress = (ushort)(_endAddress - ((ioIndex - 1) / 16));
 
             //adjust target register address according to requested io index
             ushort targetWordAddress = GetTargetAddressByIOIndex(ioIndex, _endAddress);
 
             var val =
-                (await _modbusServ.ReadRegistersAsync(targetWordAddress, 1, ct).ConfigureAwait(false))
-                .FirstOrDefault()
-                .Value;
+                (await _modbusServ.ReadInputRegistersAsync(0, targetWordAddress, 1).ConfigureAwait(false))[0];
 
-            ushort adjustedIndex = GetRegisterIndex(ioIndex, targetWordAddress, _endAddress);
+            //adjust index according to target register frame of reference
+            //(i.e. get index within the target register from io index)
+            ushort adjustedIndex = (ushort)(ioIndex - (_endAddress - targetAddress) * 16);
 
-            var state = _bitHelper.GetBitsMsbFirst(val).ToList()[adjustedIndex];
+            var state = ((val >> (16 - adjustedIndex)) & 1) == 1;
             return state;
         }
 
@@ -194,12 +199,11 @@ namespace Rox.Drivers.Phoenix
     {
 
         public PhoenixDigitalOutputModule(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort startAddress,
             ushort bitCount,
             ushort wordCount)
-            : base(bitHelper, modbusServ, startAddress, bitCount, wordCount)
+            : base(modbusServ, startAddress, bitCount, wordCount)
         {
         }
 
@@ -233,45 +237,61 @@ namespace Rox.Drivers.Phoenix
             var addresses = new HashSet<ushort>(registerGroupingDictionary.Select(a => a.Key));
             var maxAddress = addresses.Max();
             var minAddress = addresses.Min();
-            //get range which includes all required registers, then filter for required
-            var currentRegisters =
-                (await _modbusServ.ReadRegistersAsync(minAddress, (ushort)(maxAddress - minAddress + 1), ct))
-                .Where(r => addresses.Contains(r.Address))
-                .ToList();
 
-            //update output register states
-            var updatedReg =
-                currentRegisters
-                .Select(r =>
+            var registers =
+                await _modbusServ.ReadInputRegistersAsync(0, minAddress, (ushort)(maxAddress - minAddress + 1));
+
+            for (int i = 0; i < registers.Length; i++)
+            {
+                var regAddr = (ushort)(minAddress + i);
+
+                if (addresses.Contains(regAddr))
                 {
-                    ushort updateReg = r.Value;
+                    ushort updatedRegVal = registers[i];
 
                     //get the index of all high states for activation bitmask
                     var highStates =
-                        registerGroupingDictionary[r.Address]
-                        .Where(i => i.state == true)
-                        .Select(i => i.indexInReg)
+                        registerGroupingDictionary[regAddr]
+                        .Where(j => j.state == true)
+                        .Select(j => j.indexInReg)
                         .ToList();
 
                     if (highStates.Count > 0)
-                        updateReg = (ushort)(r.Value | _bitHelper.ConstructSelectivelyHighBitMaskMsbFirst(highStates));
+                        updatedRegVal = (ushort)(updatedRegVal | ConstructSelectivelyHighBitMaskMsbFirst(highStates));
 
                     //get the index of all low states for deactivation bitmask
                     var lowStates =
-                        registerGroupingDictionary[r.Address]
-                        .Where(i => i.state == false)
-                        .Select(i => i.indexInReg)
+                        registerGroupingDictionary[regAddr]
+                        .Where(j => j.state == false)
+                        .Select(j => j.indexInReg)
                         .ToList();
 
                     if (lowStates.Count > 0)
-                        updateReg = (ushort)(updateReg & _bitHelper.ConstructSelectivelyLowBitMaskMsbFirst(lowStates));
+                        updatedRegVal = (ushort)(updatedRegVal & ConstructSelectivelyLowBitMaskMsbFirst(lowStates));
 
-                    var reg = ModbusRegister.Construct(r.Address, updateReg);
-                    return reg;
-                })
-                .ToList();
+                    await _modbusServ.WriteSingleRegisterAsync(0, minAddress, updatedRegVal);
+                }
+            }
+        }
 
-            await _modbusServ.WriteRegistersAsync(updatedReg, ct);
+        public ushort ConstructSelectivelyHighBitMaskMsbFirst(IReadOnlyList<ushort> targetHighBitIndexes)
+        {
+            int start = 0b00000000_00000000;
+
+            foreach (var targetIndex in targetHighBitIndexes)
+                start |= 1 << (targetIndex - 1);
+
+            return Convert.ToUInt16(start);
+        }
+
+        public ushort ConstructSelectivelyLowBitMaskMsbFirst(IReadOnlyList<ushort> targetHighBitIndexes)
+        {
+            int start = 0b11111111_11111111;
+
+            foreach (var targetIndex in targetHighBitIndexes)
+                start ^= 1 << (targetIndex - 1);
+
+            return Convert.ToUInt16(start);
         }
 
         public async Task WriteAsync(ushort index, bool value, CancellationToken ct = default)
@@ -279,16 +299,16 @@ namespace Rox.Drivers.Phoenix
             ushort targetAddress = GetTargetAddressByIOIndex(index, _endAddress);
             ushort indexInRegister = GetRegisterIndex(index, targetAddress, _endAddress);
 
-            var currentRegister = await _modbusServ.ReadSingleRegisterAsync(targetAddress, ct);
+            var currentRegister = (await _modbusServ.ReadInputRegistersAsync(0, targetAddress, 1))[0];
             var targetIOPoints = new List<ushort>() { indexInRegister };
 
             ushort updatedRegister =
                 value ?
-                (ushort)(currentRegister.Value | _bitHelper.ConstructSelectivelyHighBitMaskMsbFirst(targetIOPoints))
+                (ushort)(currentRegister | ConstructSelectivelyHighBitMaskMsbFirst(targetIOPoints))
                 :
-                (ushort)(currentRegister.Value & _bitHelper.ConstructSelectivelyLowBitMaskMsbFirst(targetIOPoints));
+                (ushort)(currentRegister & ConstructSelectivelyLowBitMaskMsbFirst(targetIOPoints));
 
-            await _modbusServ.WriteSingleRegisterAsync(targetAddress, updatedRegister, ct);
+            await _modbusServ.WriteSingleRegisterAsync(0, targetAddress, updatedRegister);
         }
     }
 
@@ -341,8 +361,7 @@ namespace Rox.Drivers.Phoenix
     /// </summary>
     public abstract class PhoenixAnalogInputModuleBase : IAnalogInputModule
     {
-        protected readonly IWordUtilities _bitHelper;
-        protected readonly IModBusService _modbusServ;
+        protected readonly IModbusMaster _modbusServ;
 
         protected readonly ushort _dataOutWordCount;
         protected readonly ushort _dataInStartAddress;
@@ -351,13 +370,11 @@ namespace Rox.Drivers.Phoenix
         protected IReadOnlyDictionary<ushort, AnalogInputConfig> _configMap;
 
         public PhoenixAnalogInputModuleBase(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort dataInStartAddress,
             ushort dataOutStartAddress,
             ushort dataOutWordCount)
         {
-            _bitHelper = bitHelper;
             _modbusServ = modbusServ;
 
             _dataOutWordCount = dataOutWordCount;
@@ -406,12 +423,11 @@ namespace Rox.Drivers.Phoenix
     public abstract class PhoenixAnalogInputModule : PhoenixAnalogInputModuleBase
     {
         public PhoenixAnalogInputModule(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort dataInStartAddress,
             ushort dataOutStartAddress,
             ushort dataOutWordCount)
-            : base(bitHelper, modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
+            : base(modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
         {
 
         }
@@ -427,18 +443,18 @@ namespace Rox.Drivers.Phoenix
 
             while (readVal != value)
             {
-                await _modbusServ.WriteSingleRegisterAsync(_dataOutStartAddress, value, ct);
-                readVal = (await _modbusServ.ReadSingleRegisterAsync(_dataInStartAddress, ct)).Value;
+                await _modbusServ.WriteSingleRegisterAsync(0, _dataOutStartAddress, value);
+                readVal = (await _modbusServ.ReadInputRegistersAsync(0, _dataInStartAddress, 1))[0];
                 //mask off bits of interest for while comparison
                 readVal &= 0b01111111_00000000;
 
                 if (sw.Elapsed > timeout)
                 {
-                    readVal = (await _modbusServ.ReadSingleRegisterAsync(_dataInStartAddress, ct)).Value;
+                    readVal = (await _modbusServ.ReadInputRegistersAsync(0, _dataInStartAddress, 1))[0];
 
                     if (readVal >> 15 == 1)
                     {
-                        var errorVal = (await _modbusServ.ReadSingleRegisterAsync((ushort)(_dataInStartAddress + 1), ct)).Value;
+                        var errorVal = (await _modbusServ.ReadInputRegistersAsync(0, (ushort)(_dataInStartAddress + 1), 1))[0];
 
                         throw new Exception(
                             $"Timed out while waiting for mirrored command to match written command. " +
@@ -468,15 +484,14 @@ namespace Rox.Drivers.Phoenix
         };
 
         public PhoenixAnalogInputModule_2700458(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort dataInStartAddress,
             ushort dataOutStartAddress,
             ushort dataInWordCount,
             ushort dataOutWordCount,
             SampleAverageAmount defaultSampleAvgConfig = SampleAverageAmount.Four,
             AnalogMeasurementRange defaultMeasurementConfig = AnalogMeasurementRange.FourToTwentyMilliamps)
-            : base(bitHelper, modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
+            : base(modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
         {
             _defaultMeasurementConfig = defaultMeasurementConfig;
             _defaultSampleAvgConfig = defaultSampleAvgConfig;
@@ -488,52 +503,37 @@ namespace Rox.Drivers.Phoenix
             SampleAverageAmount sampleAvgAmt,
             AnalogMeasurementRange measurementRange)
         {
-            bool[] bits = new bool[16];
+            int val = 0;
             //apply config flag so actually gets written
-            bits[0] = true;
+            val |= 0b_10000000_00000000;
 
             switch (sampleAvgAmt)
             {
                 case SampleAverageAmount.Four:
-                    bits[6] = true;
-                    bits[7] = false;
+                    val |= 0b_00000010_00000000;
                     break;
                 case SampleAverageAmount.Sixteen:
-                    bits[6] = false;
-                    bits[7] = false;
                     break;
                 case SampleAverageAmount.ThirtyTwo:
-                    bits[6] = true;
-                    bits[7] = true;
+                    val |= 0b_00000011_00000000;
                     break;
                 default:
                     throw new Exception("Failed to build module configuration word. Sample average count not recognized");
             }
 
-            //message format IB IL (note that this is 12 bit, not 15 bit, so needs different decode function from base implementation)
-            bits[10] = false;
-            bits[11] = false;
-
             switch (measurementRange)
             {
                 case AnalogMeasurementRange.ZeroToTwentyMilliamps:
-                    bits[12] = false;
-                    bits[13] = true;
-                    bits[14] = false;
-                    bits[15] = false;
+                    val |= 0b_00000000_00000100;
                     break;
                 case AnalogMeasurementRange.FourToTwentyMilliamps:
-                    bits[12] = false;
-                    bits[13] = true;
-                    bits[14] = true;
-                    bits[15] = false;
+                    val |= 0b_00000000_00000110;
                     break;
                 default:
                     throw new Exception("Failed to build module configuration. Measurement range not recognized");
             }
 
-            ushort configWord = _bitHelper.ConstructWordMsbFirst(bits);
-            return configWord;
+            return (ushort)val;
         }
 
         // a word is one-to-one with a analog value
@@ -557,7 +557,7 @@ namespace Rox.Drivers.Phoenix
 
                 var configWord = BuildConfigurationWord(sampleAvg, measurementRange);
 
-                await _modbusServ.WriteSingleRegisterAsync(i, configWord, ct);
+                await _modbusServ.WriteSingleRegisterAsync(0, i, configWord);
             }
         }
 
@@ -568,9 +568,7 @@ namespace Rox.Drivers.Phoenix
             foreach (var index in indexes)
             {
                 var val =
-                    (await _modbusServ.ReadRegistersAsync((ushort)(_dataInStartAddress + index - 1), 1, ct).ConfigureAwait(false))
-                    .Single()
-                    .Value;
+                    (await _modbusServ.ReadInputRegistersAsync(0, (ushort)(_dataInStartAddress + index - 1), 1).ConfigureAwait(false))[0];
 
                 var measurementRange = _defaultMeasurementConfig;
 
@@ -615,14 +613,13 @@ namespace Rox.Drivers.Phoenix
         };
 
         public PhoenixAnalogInputModule_2742748(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort dataInStartAddress,
             ushort dataOutStartAddress,
             ushort dataOutWordCount,
             SampleAverageAmount defaultSampleAvgConfig = SampleAverageAmount.Four,
             AnalogMeasurementRange defaultMeasurementConfig = AnalogMeasurementRange.FourToTwentyMilliamps)
-            : base(bitHelper, modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
+            : base(modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
         {
             _defaultMeasurementConfig = defaultMeasurementConfig;
             _defaultSampleAvgConfig = defaultSampleAvgConfig;
@@ -663,8 +660,8 @@ namespace Rox.Drivers.Phoenix
                 while (readConfig != configWord)
                 {
                     //plus 1 since first word is command word
-                    await _modbusServ.WriteSingleRegisterAsync((ushort)(_dataOutStartAddress + 1), configWord, ct);
-                    readConfig = (await _modbusServ.ReadSingleRegisterAsync((ushort)(_dataInStartAddress + 1), ct)).Value;
+                    await _modbusServ.WriteSingleRegisterAsync(0, (ushort)(_dataOutStartAddress + 1), configWord);
+                    readConfig = (await _modbusServ.ReadInputRegistersAsync(0,(ushort)(_dataInStartAddress + 1), 1))[0];
 
                     if (sw.Elapsed > initTimeout)
                         throw new TimeoutException("Timed out waiting for specified config to match read config.");
@@ -684,9 +681,7 @@ namespace Rox.Drivers.Phoenix
                 await WriteCommandUntilMirrored(measurementCmd, TimeSpan.FromSeconds(3), ct);
 
                 var val =
-                    (await _modbusServ.ReadRegistersAsync((ushort)(_dataInStartAddress + 1), 1, ct).ConfigureAwait(false))
-                    .Single()
-                    .Value;
+                    (await _modbusServ.ReadInputRegistersAsync(0, (ushort)(_dataInStartAddress + 1), 1).ConfigureAwait(false))[0];
 
                 var measurementRange = _defaultMeasurementConfig;
 
@@ -706,69 +701,44 @@ namespace Rox.Drivers.Phoenix
             SampleAverageAmount sampleAvgAmount,
             AnalogMeasurementRange currentMeasurementRange)
         {
-            bool[] bits = new bool[16];
+            int val = 0;
 
             switch (sampleAvgAmount)
             {
                 case SampleAverageAmount.Four:
-                    bits[6] = true;
-                    bits[7] = false;
+                    val |= 0b_00000010_00000000;
                     break;
                 case SampleAverageAmount.Sixteen:
-                    bits[6] = false;
-                    bits[7] = false;
                     break;
                 case SampleAverageAmount.ThirtyTwo:
-                    bits[6] = true;
-                    bits[7] = true;
+                    val |= 0b_00000011_00000000;
                     break;
                 default:
                     throw new Exception("Failed to build module configuration word. Sample average count not recognized");
             }
 
-            //message format IB IL (15 bits)
-            bits[9] = false;
-            bits[10] = false;
-            bits[11] = false;
-
             switch (currentMeasurementRange)
             {
                 case AnalogMeasurementRange.ZeroToTwentyMilliamps:
-                    bits[12] = true;
-                    bits[13] = false;
-                    bits[14] = false;
-                    bits[15] = false;
+                    val |= 0b_00000000_00001000;
                     break;
                 case AnalogMeasurementRange.FourToTwentyMilliamps:
-                    bits[12] = true;
-                    bits[13] = false;
-                    bits[14] = true;
-                    bits[15] = false;
+                    val |= 0b_00000000_00001010;
                     break;
                 case AnalogMeasurementRange.PlusMinusTwentyMilliamps:
-                    bits[12] = true;
-                    bits[13] = false;
-                    bits[14] = false;
-                    bits[15] = true;
+                    val |= 0b_00000000_00001001;
                     break;
                 case AnalogMeasurementRange.ZeroToFortyMilliamps:
-                    bits[12] = true;
-                    bits[13] = true;
-                    bits[14] = false;
-                    bits[15] = false;
+                    val |= 0b_00000000_00001100;
                     break;
                 case AnalogMeasurementRange.PlusMinusFortyMilliamps:
-                    bits[12] = true;
-                    bits[13] = true;
-                    bits[14] = false;
-                    bits[15] = true;
+                    val |= 0b_00000000_00001101;
                     break;
                 default:
                     throw new Exception("Failed to build module configuration. Measurement range not recognized");
             }
 
-            ushort configWord = _bitHelper.ConstructWordMsbFirst(bits);
-            return configWord;
+            return (ushort)val;
         }
     }
 
@@ -794,15 +764,14 @@ namespace Rox.Drivers.Phoenix
         };
 
         public PhoenixAnalogInputModule_2878447(
-            IWordUtilities bitHelper,
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort dataInStartAddress,
             ushort dataOutStartAddress,
             ushort dataInWordCount,
             ushort dataOutWordCount,
             SampleAverageAmount defaultSampleAvgConfig = SampleAverageAmount.Sixteen,
             AnalogMeasurementRange defaultMeasurementConfig = AnalogMeasurementRange.FourToTwentyMilliamps)
-            : base(bitHelper, modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
+            : base(modbusServ, dataInStartAddress, dataOutStartAddress, dataOutWordCount)
         {
             _dataInWordCount = dataInWordCount;
 
@@ -841,9 +810,9 @@ namespace Rox.Drivers.Phoenix
                 while (readConfig != config)
                 {
                     //write configuration for current channel index
-                    await _modbusServ.WriteSingleRegisterAsync((ushort)(_dataOutStartAddress + i), config, ct);
+                    await _modbusServ.WriteSingleRegisterAsync(0, (ushort)(_dataOutStartAddress + i), config);
                     //read back status
-                    var status = (await _modbusServ.ReadSingleRegisterAsync(_dataInStartAddress, ct)).Value;
+                    var status = (await _modbusServ.ReadInputRegistersAsync(0, _dataInStartAddress, 1))[0];
 
                     if (status >> 15 == 1)
                         throw new Exception("Status register indicated error");
@@ -853,14 +822,14 @@ namespace Rox.Drivers.Phoenix
                     await WriteCommandUntilMirrored(readConfigCommand, initTimeout - (DateTime.UtcNow - startTime));
 
                     //read config back; this will always be in IN word 2
-                    readConfig = (await _modbusServ.ReadSingleRegisterAsync((ushort)(_dataInStartAddress + 1), ct)).Value;
+                    readConfig = (await _modbusServ.ReadInputRegistersAsync(0, (ushort)(_dataInStartAddress + 1), 1))[0];
 
                     await WriteCommandUntilMirrored(configCommandWord, initTimeout - (DateTime.UtcNow - startTime));
                 }
             }
 
             //send read analog value command; continually reads value so no need to send each time
-            await _modbusServ.WriteSingleRegisterAsync(_dataOutStartAddress, 0, ct);
+            await _modbusServ.WriteSingleRegisterAsync(0, _dataOutStartAddress, 0);
         }
 
         public override async Task<IReadOnlyDictionary<ushort, double>> ReadManyAsync(IEnumerable<ushort> indexes, CancellationToken ct = default)
@@ -871,9 +840,7 @@ namespace Rox.Drivers.Phoenix
             {
                 var val =
                     //no minus 1 since first IN word is echo of OUT command word
-                    (await _modbusServ.ReadRegistersAsync((ushort)(_dataInStartAddress + index), 1, ct).ConfigureAwait(false))
-                    .Single()
-                    .Value;
+                    (await _modbusServ.ReadInputRegistersAsync(0, (ushort)(_dataInStartAddress + index), 1).ConfigureAwait(false))[0];
 
                 double data = DecodeRegisterValue(val); // Use base function for 15 bit IB IL
 
@@ -894,80 +861,48 @@ namespace Rox.Drivers.Phoenix
             SampleAverageAmount sampleAvgAmount,
             AnalogMeasurementRange currentMeasurementRange)
         {
-            bool[] bits = new bool[16];
+            int val = 0;
 
             switch (sampleAvgAmount)
             {
                 case SampleAverageAmount.Four:
-                    bits[6] = true;
-                    bits[7] = false;
+                    val |= 0b_00000010_00000000;
                     break;
                 case SampleAverageAmount.Sixteen:
-                    bits[6] = false;
-                    bits[7] = false;
                     break;
                 case SampleAverageAmount.ThirtyTwo:
-                    bits[6] = true;
-                    bits[7] = true;
+                    val |= 0b_00000011_00000000;
                     break;
                 default:
                     throw new Exception("Failed to build module configuration word. Sample average count not recognized");
             }
 
-            //message format IB IL
-            bits[10] = false;
-            bits[11] = false;
-
             switch (currentMeasurementRange)
             {
                 case AnalogMeasurementRange.ZeroToTwentyMilliamps:
-                    bits[12] = true;
-                    bits[13] = false;
-                    bits[14] = false;
-                    bits[15] = false;
+                    val |= 0b_00000000_00001000;
                     break;
                 case AnalogMeasurementRange.FourToTwentyMilliamps:
-                    bits[12] = true;
-                    bits[13] = false;
-                    bits[14] = true;
-                    bits[15] = false;
+                    val |= 0b_00000000_00001010; 
                     break;
                 case AnalogMeasurementRange.PlusMinusTwentyMilliamps:
-                    bits[12] = true;
-                    bits[13] = false;
-                    bits[14] = false;
-                    bits[15] = true;
+                    val |= 0b_00000000_00001001;
                     break;
                 case AnalogMeasurementRange.ZeroToTenVolts:
-                    bits[12] = false;
-                    bits[13] = false;
-                    bits[14] = false;
-                    bits[15] = false;
                     break;
                 case AnalogMeasurementRange.ZeroToFiveVolts:
-                    bits[12] = false;
-                    bits[13] = false;
-                    bits[14] = true;
-                    bits[15] = false;
+                    val |= 0b_00000000_00000010;
                     break;
                 case AnalogMeasurementRange.PlusMinusTenVolts:
-                    bits[12] = false;
-                    bits[13] = false;
-                    bits[14] = false;
-                    bits[15] = true;
+                    val |= 0b_00000000_00000001;
                     break;
                 case AnalogMeasurementRange.PlusMinusFiveVolts:
-                    bits[12] = false;
-                    bits[13] = false;
-                    bits[14] = true;
-                    bits[15] = true;
+                    val |= 0b_00000000_00000011;
                     break;
                 default:
                     throw new Exception("Failed to build module configuration. Measurement range not recognized");
             }
-
-            ushort configWord = _bitHelper.ConstructWordMsbFirst(bits);
-            return configWord;
+            return (ushort)val;
         }
     }
 
@@ -988,7 +923,7 @@ namespace Rox.Drivers.Phoenix
     {
 
         private IReadOnlyDictionary<ushort, AnalogMeasurementRange> _configMap;
-        private readonly IModBusService _modbusServ;
+        private readonly IModbusMaster _modbusServ;
 
         private readonly AnalogMeasurementRange _defaultMeasurementTypeConfig;
 
@@ -1003,7 +938,7 @@ namespace Rox.Drivers.Phoenix
         private const double _maxRegVal = 32512;
 
         public PhoenixAnalogOutputModule_2700775(
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             ushort dataInStartAddress,
             ushort dataOutStartAddress,
             AnalogMeasurementRange defaultMeasurementTypeConfig = AnalogMeasurementRange.ZeroToTenVolts)
@@ -1093,13 +1028,13 @@ namespace Rox.Drivers.Phoenix
 
             while (readVal != maskedVal)
             {
-                await _modbusServ.WriteSingleRegisterAsync(outAddress, value, ct);
-                readVal = (await _modbusServ.ReadSingleRegisterAsync(inAddress, ct)).Value;
+                await _modbusServ.WriteSingleRegisterAsync(0, outAddress, value);
+                readVal = (await _modbusServ.ReadInputRegistersAsync(0, inAddress, 1))[0];
                 readVal &= 0b00000000_00111111;
 
                 if ((DateTime.UtcNow - startTime) > timeout)
                 {
-                    readVal = (await _modbusServ.ReadSingleRegisterAsync(inAddress, ct)).Value;
+                    readVal = (await _modbusServ.ReadInputRegistersAsync(0, inAddress, 1))[0];
 
                     if (readVal >> 15 == 1)
                     {
@@ -1144,20 +1079,22 @@ namespace Rox.Drivers.Phoenix
         public async Task<IReadOnlyDictionary<ushort, double>> ReadManyAsync(IEnumerable<ushort> indexes, CancellationToken ct = default)
         {
             var indexHash = new HashSet<ushort>(indexes);
-            var regVals = await _modbusServ.ReadRegistersAsync((ushort)(_dataInStartAddress + 2), 2, ct);
+            var addr = (ushort)(_dataInStartAddress + 2);
+            var regVals = await _modbusServ.ReadInputRegistersAsync(0, addr, 2);
 
             var filtered =
                 regVals
-                .Where(x => indexHash.Contains((ushort)(x.Address - _dataInStartAddress - 1)))
+                .Select((x, i) => (address: addr + i, value: x))
+                .Where(x => indexHash.Contains((ushort)(x.address - _dataInStartAddress - 1)))
                 .ToDictionary(
-                    x => (ushort)(x.Address - _dataInStartAddress - 1),
+                    x => (ushort)(x.address - _dataInStartAddress - 1),
                     x =>
                     {
                         var outputType = _defaultMeasurementTypeConfig;
-                        if (_configMap.TryGetValue((ushort)(x.Address - _dataInStartAddress - 1), out var measurementType))
+                        if (_configMap.TryGetValue((ushort)(x.address - _dataInStartAddress - 1), out var measurementType))
                             outputType = measurementType;
 
-                        return ConvertRegisterValueToValue(DecodeRegisterBits(x.Value), outputType);
+                        return ConvertRegisterValueToValue(DecodeRegisterBits(x.value), outputType);
                     });
 
             return filtered;
@@ -1166,7 +1103,7 @@ namespace Rox.Drivers.Phoenix
         public Task WriteAsync(ushort index, double value, CancellationToken ct = default)
         {
             //+2 because first two out words are configuration, + index to set correct output, -1 because 0 indexed
-            return _modbusServ.WriteSingleRegisterAsync((ushort)(_dataOutStartAddress + 2 + index - 1), ConvertTargetValueToRegisterVal(value, _configMap[index]), ct);
+            return _modbusServ.WriteSingleRegisterAsync(0, (ushort)(_dataOutStartAddress + 2 + index - 1), ConvertTargetValueToRegisterVal(value, _configMap[index]));
         }
 
         public async Task WriteManyAsync(IReadOnlyDictionary<ushort, double> values, CancellationToken ct = default)
@@ -1200,7 +1137,7 @@ namespace Rox.Drivers.Phoenix
     public class PhoenixAnalogOutputModule_2702497 : IAnalogOutputModule
     {
         private readonly ushort _dataOutStartAddress;
-        private readonly IModBusService _modbusServ;
+        private readonly IModbusMaster _modbusServ;
 
         private const double _minCurrent = 4;
         private const double _maxCurrent = 20;
@@ -1211,7 +1148,7 @@ namespace Rox.Drivers.Phoenix
 
         public PhoenixAnalogOutputModule_2702497(
             ushort dataOutStartAddress,
-            IModBusService modbusServ)
+            IModbusMaster modbusServ)
         {
             _dataOutStartAddress = dataOutStartAddress;
             _modbusServ = modbusServ;
@@ -1248,7 +1185,7 @@ namespace Rox.Drivers.Phoenix
         public async Task WriteManyAsync(IReadOnlyDictionary<ushort, double> values, CancellationToken ct = default)
         {
             foreach (var kvp in values)
-                await _modbusServ.WriteSingleRegisterAsync((ushort)(_dataOutStartAddress + kvp.Key - 1), ConvertTargetCurrentToRegisterVal(kvp.Value), ct);
+                await _modbusServ.WriteSingleRegisterAsync(0, (ushort)(_dataOutStartAddress + kvp.Key - 1), ConvertTargetCurrentToRegisterVal(kvp.Value));
         }
 
         public Task WriteAsync(ushort index, double value, CancellationToken ct = default)
@@ -1262,7 +1199,7 @@ namespace Rox.Drivers.Phoenix
 
             foreach (var index in indexes)
             {
-                var regVal = (await _modbusServ.ReadSingleRegisterAsync((ushort)(_dataOutStartAddress + index - 1), ct)).Value;
+                var regVal = (await _modbusServ.ReadInputRegistersAsync(0, (ushort)(_dataOutStartAddress + index - 1), 1))[0];
                 output[index] = ConvertRegisterValueToCurrent(regVal);
             }
 
@@ -1314,13 +1251,18 @@ namespace Rox.Drivers.Phoenix
 
     }
 
+    public interface IDisposableConnection : IDisposable
+    {
+        Task<bool> IsConnectedAsync(CancellationToken ct = default);
+    }
+
     /// <summary>
     /// Represents an ephemeral connection to an aggregate of IO sources presented as if contiguous IO. 
     /// These IO can be on same device or not and can use the same communication protocol or not
     /// </summary>
     public class IOBus : IDisposableIOBus
     {
-        private readonly IDisposableConnection _connection;
+        private readonly IModbusMaster _connection;
 
         private readonly DigitalInputModulesActionsModel _digitalInputActionsModel;
         private readonly DigitalOutputModulesActionsModel _digitalOutputActionsModel;
@@ -1328,7 +1270,7 @@ namespace Rox.Drivers.Phoenix
         private readonly AnalogOutputModulesActionsModel _analogOutputActionsModel;
 
         public IOBus(
-            IDisposableConnection commConnection,
+            IModbusMaster master,
             DigitalInputModulesActionsModel digitalInputActionsModel,
             DigitalOutputModulesActionsModel digitalOutputActionsModel,
             AnalogInputModulesActionsModel analogInputActionsModel,
@@ -1339,7 +1281,7 @@ namespace Rox.Drivers.Phoenix
             _analogInputActionsModel = analogInputActionsModel;
             _analogOutputActionsModel = analogOutputActionsModel;
 
-            _connection = commConnection;
+            _connection = master;
         }
 
         private bool _isDisposed;
@@ -1482,9 +1424,18 @@ namespace Rox.Drivers.Phoenix
 
         #region IIOBus
 
-        public Task<bool> IsConnectedAsync(CancellationToken ct = default)
+        public async Task<bool> IsConnectedAsync(CancellationToken ct = default)
         {
-            return _connection.IsConnectedAsync(ct);
+            //READ SPECIFIC REGISTER HERE
+            try
+            {
+                await _connection.ReadInputRegistersAsync(0, 1400, 1);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            } 
         }
 
         public async Task<double> ReadAnalogInputAsync(ushort index, CancellationToken ct = default)
@@ -1772,12 +1723,10 @@ namespace Rox.Drivers.Phoenix
 
     public class PhoenixIOBusConnectionFactory : ITcpIOBusConnectionFactory
     {
-        private readonly IModbusTcpConnectionFactory _connectionFactory;
-
         //NEEDS TO BE LIST SINCE SAME MODULE CAN BE AN INPUT AND OUTPUT PROCESS DATA TYPE 
         //need these to determine address since inputs are assigned addresses prior to outputs in dynamic tables
-        private static readonly IReadOnlyDictionary<ushort, (ModuleProcessDataType dataType, IoType iotype)> _moduleIdCodeDataTypeMap =
-            new Dictionary<ushort, (ModuleProcessDataType dataType, IoType iotype)>()
+        private static readonly IReadOnlyDictionary<int, (ModuleProcessDataType dataType, IoType iotype)> _moduleIdCodeDataTypeMap =
+            new Dictionary<int, (ModuleProcessDataType dataType, IoType iotype)>()
             {
                 { 190, (ModuleProcessDataType.Input, IoType.DigitalInput) },
                 { 126, (ModuleProcessDataType.Input, IoType.DigitalInput) },
@@ -1789,7 +1738,7 @@ namespace Rox.Drivers.Phoenix
                 { 95, (ModuleProcessDataType.InputOutput, IoType.AnalogInput) }
             };
 
-        private enum DataLengthUnits : ushort
+        private enum DataLengthUnits
         {
             Bit = 1,
             Nibble = 4,
@@ -1802,8 +1751,8 @@ namespace Rox.Drivers.Phoenix
         /// <summary>
         /// This hard-coded encoding is defined by phoenix and can be found in IBS SYS FW G4 UM E 
         /// </summary>
-        private static readonly IReadOnlyDictionary<ushort, DataLengthUnits> LengthIdToDataBitsMap =
-            new Dictionary<ushort, DataLengthUnits>()
+        private static readonly IReadOnlyDictionary<int, DataLengthUnits> LengthIdToDataBitsMap =
+            new Dictionary<int, DataLengthUnits>()
             {
                 { 0, DataLengthUnits.Word },
                 { 2, DataLengthUnits.Byte },
@@ -1811,35 +1760,30 @@ namespace Rox.Drivers.Phoenix
                 { 3, DataLengthUnits.Bit },
             };
 
-        private ushort DecodeDataBitsLength(byte dataLengthByte)
+        private int DecodeDataBitsLength(byte dataLengthByte)
         {
-            var bits = _bitHelper.GetBitsMsbFirst(dataLengthByte).Skip(8);
-            var lengthUnitBits = Enumerable.Concat(Enumerable.Repeat(false, 14), bits.Take(2)).ToList();
-            ushort lengthUnitId = _bitHelper.ConstructWordMsbFirst(lengthUnitBits);
-            var unitAmountBits = Enumerable.Concat(Enumerable.Repeat(false, 10), bits.Skip(2)).ToList();
-            ushort unitAmount = _bitHelper.ConstructWordMsbFirst(unitAmountBits);
-
-            ushort dataBitsCount = (ushort)((ushort)LengthIdToDataBitsMap[lengthUnitId] * unitAmount);
+            int lengthUnitId = dataLengthByte >> 6;
+            int unitAmount = dataLengthByte & 0b_00111111;
+            int dataBitsCount = (int)LengthIdToDataBitsMap[lengthUnitId] * unitAmount;
             return dataBitsCount;
         }
 
-        private delegate IDigitalInputModule BuildDigInModule(IModBusService modbusServ, IoModuleInfo modInfo);
+        private delegate IDigitalInputModule BuildDigInModule(IModbusMaster modbusServ, IoModuleInfo modInfo);
 
         private readonly IReadOnlyDictionary<byte, BuildDigInModule> _digitalInputModuleBuilder = new Dictionary<byte, BuildDigInModule>()
         {
             {
                 190,
-                (modbusServ, moduleInfo) =>
+                (modbusMaster, moduleInfo) =>
                     new PhoenixDigitalInputModule(
-                        _bitHelper,
-                        modbusServ,
+                        modbusMaster,
                         moduleInfo.DataInStartAddress,
                         moduleInfo.DataBitCount,
                         moduleInfo.WordCount)
             }
         };
 
-        private delegate IDigitalOutputModule BuildDigOutModule(IModBusService modbusServ, IoModuleInfo modInfo);
+        private delegate IDigitalOutputModule BuildDigOutModule(IModbusMaster modbusServ, IoModuleInfo modInfo);
 
         private readonly IReadOnlyDictionary<byte, BuildDigOutModule> _digitalOutputModuleBuilder = new Dictionary<byte, BuildDigOutModule>()
         {
@@ -1847,7 +1791,6 @@ namespace Rox.Drivers.Phoenix
                 189,
                 (modbusServ, moduleInfo) =>
                     new PhoenixDigitalOutputModule(
-                        _bitHelper,
                         modbusServ,
                         moduleInfo.DataOutStartAddress,
                         moduleInfo.DataBitCount,
@@ -1855,7 +1798,7 @@ namespace Rox.Drivers.Phoenix
             }
         };
 
-        private delegate IAnalogInputModule BuildAnalogInModule(IModBusService modbusServ, IoModuleInfo modInfo);
+        private delegate IAnalogInputModule BuildAnalogInModule(IModbusMaster modbusServ, IoModuleInfo modInfo);
 
         private readonly IReadOnlyDictionary<byte, BuildAnalogInModule> _analogInputModuleBuilder = new Dictionary<byte, BuildAnalogInModule>()
         {
@@ -1863,7 +1806,6 @@ namespace Rox.Drivers.Phoenix
                 127,
                 (modbusServ, moduleInfo) =>
                     new PhoenixAnalogInputModule_2700458(
-                        _bitHelper,
                         modbusServ,
                         moduleInfo.DataInStartAddress,
                         moduleInfo.DataOutStartAddress,
@@ -1874,7 +1816,6 @@ namespace Rox.Drivers.Phoenix
                 223,
                 (modbusServ, moduleInfo) =>
                     new PhoenixAnalogInputModule_2878447(
-                        _bitHelper,
                         modbusServ,
                         moduleInfo.DataInStartAddress,
                         moduleInfo.DataOutStartAddress,
@@ -1886,7 +1827,6 @@ namespace Rox.Drivers.Phoenix
                 95,
                 (modbusServ, moduleInfo) =>
                     new PhoenixAnalogInputModule_2742748(
-                        _bitHelper,
                         modbusServ,
                         moduleInfo.DataInStartAddress,
                         moduleInfo.DataOutStartAddress,
@@ -1894,7 +1834,7 @@ namespace Rox.Drivers.Phoenix
             }
         };
 
-        private delegate IAnalogOutputModule BuildAnalogOutModule(IModBusService modbusServ, IoModuleInfo modInfo);
+        private delegate IAnalogOutputModule BuildAnalogOutModule(IModbusMaster modbusServ, IoModuleInfo modInfo);
 
         private readonly IReadOnlyDictionary<byte, BuildAnalogOutModule> _analogOutputModuleBuilder = new Dictionary<byte, BuildAnalogOutModule>()
         {
@@ -1915,16 +1855,13 @@ namespace Rox.Drivers.Phoenix
             }
         };
 
-        private static readonly IWordUtilities _bitHelper = new BitHelper();
-
-        public PhoenixIOBusConnectionFactory(
-            IModbusTcpConnectionFactory modbusConnectionFactory)
+        public PhoenixIOBusConnectionFactory()
         {
-            _connectionFactory = modbusConnectionFactory;
+
         }
 
         protected async Task<IEnumerable<IoModulePreliminaryInfo>> GetCurrentModuleConfigurationAsync(
-            IModBusService modServ,
+            IModbusMaster modServ,
             CancellationToken ct = default)
         {
             ushort moduleCountRegAddr = 1400;
@@ -1934,7 +1871,7 @@ namespace Rox.Drivers.Phoenix
             while (moduleCount == 0)
             {
                 //get modules at runtime
-                moduleCount = (await modServ.ReadSingleRegisterAsync(moduleCountRegAddr, ct)).Value;
+                moduleCount = (await modServ.ReadInputRegistersAsync(0, moduleCountRegAddr, 1))[0];
 
                 await Task.Delay(500);
             }
@@ -1942,19 +1879,19 @@ namespace Rox.Drivers.Phoenix
             ushort modInfoRegAddr = 1401;
 
             var modInfoCollection =
-                (await modServ.ReadRegistersAsync(modInfoRegAddr, moduleCount, ct))
-                .Select(m =>
+                (await modServ.ReadInputRegistersAsync(0, modInfoRegAddr, moduleCount))
+                .Select((m, i) =>
                 {
                     //TODO: KEY NOT FOUND
-                    ushort dataBitsLength = DecodeDataBitsLength(m.HighByte);
+                    ushort dataBitsLength = (ushort)DecodeDataBitsLength((byte)(m >> 8));
                     ushort dataWordsLength = (ushort)(dataBitsLength / 16);
                     //round up if module takes up a portion of a register
                     if (dataBitsLength % 16 != 0)
                         dataWordsLength++;
 
-                    byte idCode = m.LowByte;
+                    byte idCode = (byte)m;
 
-                    ushort modIndex = (ushort)(m.Address - modInfoRegAddr);
+                    ushort modIndex = (ushort)i;
 
                     bool found = _moduleIdCodeDataTypeMap.TryGetValue(idCode, out var mod);
 
@@ -1969,7 +1906,7 @@ namespace Rox.Drivers.Phoenix
         }
 
         protected DigitalOutputModulesActionsModel BuildDigitalOutputActionsModel(
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             IEnumerable<IoModuleInfo> modules)
         {
             var indexToModuleIdMap = new Dictionary<ushort, ushort>();
@@ -2010,7 +1947,7 @@ namespace Rox.Drivers.Phoenix
         }
 
         protected DigitalInputModulesActionsModel BuildDigitalInputActionsModel(
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             IEnumerable<IoModuleInfo> modules)
         {
             var indexToModuleIdMap = new Dictionary<ushort, ushort>();
@@ -2046,7 +1983,7 @@ namespace Rox.Drivers.Phoenix
         }
 
         protected async Task<AnalogInputModulesActionsModel> BuildAnalogInputActionsModelAsync(
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             IEnumerable<IoModuleInfo> modules,
             IReadOnlyDictionary<ushort, AnalogInputConfig> analogConfig,
             CancellationToken ct = default)
@@ -2093,7 +2030,7 @@ namespace Rox.Drivers.Phoenix
         }
 
         protected async Task<AnalogOutputModulesActionsModel> BuildAnalogOutputActionsModelAsync(
-            IModBusService modbusServ,
+            IModbusMaster modbusServ,
             IEnumerable<IoModuleInfo> modules,
             IReadOnlyDictionary<ushort, AnalogMeasurementRange> analogConfig,
             CancellationToken ct = default)
@@ -2231,8 +2168,11 @@ namespace Rox.Drivers.Phoenix
             int port = 502,
             CancellationToken ct = default)
         {
-            var modbusServ = await _connectionFactory.ConnectAsync(ipAddress, connectionWatchdogInterval, connectionTimeout, port, ct).ConfigureAwait(false);
-            var modInfoCollection = await GetCurrentModuleConfigurationAsync(modbusServ, ct).ConfigureAwait(false);
+            var factory = new ModbusFactory();
+            var adapter = new TcpClientAdapter(new TcpClient(ipAddress, port));
+            IModbusMaster master = factory.CreateIpMaster(adapter);
+
+            var modInfoCollection = await GetCurrentModuleConfigurationAsync(master, ct).ConfigureAwait(false);
 
             var modInfo = AugmentModuleInfo(modInfoCollection);
 
@@ -2242,21 +2182,21 @@ namespace Rox.Drivers.Phoenix
                 .ToDictionary(g => g.Key, g => g.ToList());
 
             var digitalInputModules = moduleMap[IoType.DigitalInput];
-            var digitalInputActionsModel = BuildDigitalInputActionsModel(modbusServ, digitalInputModules);
+            var digitalInputActionsModel = BuildDigitalInputActionsModel(master, digitalInputModules);
             var digitalOutputModules = moduleMap[IoType.DigitalOutput];
-            var digitalOutputActionsModel = BuildDigitalOutputActionsModel(modbusServ, digitalOutputModules);
+            var digitalOutputActionsModel = BuildDigitalOutputActionsModel(master, digitalOutputModules);
 
             if (!moduleMap.TryGetValue(IoType.AnalogInput, out var analogInputModules))
                 analogInputModules = new List<IoModuleInfo>();
 
-            var analogInputActionsModel = await BuildAnalogInputActionsModelAsync(modbusServ, analogInputModules, analogInConfig, ct);
+            var analogInputActionsModel = await BuildAnalogInputActionsModelAsync(master, analogInputModules, analogInConfig, ct);
 
             if (!moduleMap.TryGetValue(IoType.AnalogOutput, out var analogOutputModules))
                 analogOutputModules = new List<IoModuleInfo>();
 
-            var analogOutputActionsModel = await BuildAnalogOutputActionsModelAsync(modbusServ, analogOutputModules, analogOutConfig, ct);
+            var analogOutputActionsModel = await BuildAnalogOutputActionsModelAsync(master, analogOutputModules, analogOutConfig, ct);
 
-            return new IOBus(modbusServ, digitalInputActionsModel, digitalOutputActionsModel, analogInputActionsModel, analogOutputActionsModel);
+            return new IOBus(master, digitalInputActionsModel, digitalOutputActionsModel, analogInputActionsModel, analogOutputActionsModel);
         }
     }
 
