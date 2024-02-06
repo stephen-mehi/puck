@@ -63,11 +63,7 @@ jobs:
       uses: Azure/setup-kubectl@v3
   
     - name: Setup kubectl
-      env: 
-        K8S_CONFIG: ${{ secrets.KUBERNETES_CONFIG_BASE_64 }}
-      run: |
-        mkdir -p $HOME/.kube
-        echo "${K8S_CONFIG}" | base64 --decode > $HOME/.kube/config
+      run: kubectl config --kubeconfig $HOME/.kube/config/kube.config
     - name: Set cluster
       run: kubectl config set-cluster microk8s-cluster --server=http://192.168.1.9:16443
     - name: Create context
