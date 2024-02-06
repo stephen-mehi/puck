@@ -9,18 +9,17 @@ on:
 jobs:
 
   build:
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v3 # Checkout the repository code
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      run: docker build . --file Dockerfile --tag puck:$(date +%s)
+      
     - name: Setup .NET Core SDK  # Set up .NET Core SDK
       uses: actions/setup-dotnet@v1
       with:
         dotnet-version: '8.0.x'
-    
+        
     - name: Restore dependencies  # Restore project dependencies
       run: dotnet restore
 
@@ -37,14 +36,19 @@ jobs:
     steps:
       - name: Checkout code  # Checkout the repository code
         uses: actions/checkout@v2
-
+        
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.DOCKERHUB_PAT }}
+          
       - name: Build Docker image  # Build Docker image
-        run: docker build -t puck:latest .
+        run: docker build -t puck:$(date +%s) .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
-        run: |
-          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-          docker push your-image-name:latest
+        run: docker push puck:$(date +%s)
 
   deploy:
     runs-on: ubuntu-latest  # Specify the runner environment
