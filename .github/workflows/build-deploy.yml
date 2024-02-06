@@ -45,10 +45,10 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PAT }}
           
       - name: Build Docker image  # Build Docker image
-        run: docker build -t puck:latest .
+        run: docker build -t smehi/puck:latest .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
-        run: docker push puck:latest
+        run: docker push smehi/puck:latest
 
   deploy:
     runs-on: ubuntu-latest  # Specify the runner environment
