@@ -51,17 +51,28 @@ jobs:
         run: docker push smehi/puck:latest
 
   deploy:
-    runs-on: ubuntu-latest  # Specify the runner environment
-
-    needs: docker  # Ensure that the 'docker' job completes successfully before starting this job
-
+    name: kubernetes deploy
+    environment:
+      name: dev
+    runs-on: ubuntu-latest
+    needs: docker
+    
     steps:
-      - name: Checkout code  # Checkout the repository code
-        uses: actions/checkout@v2
-
-      - name: Deploy to MicroK8s
-        env:
-          KUBE_CONFIG_DATA: ${{ secrets.KUBERNETES_CONFIG_BASE_64 }}
-        run: |
-          echo "$KUBE_CONFIG_DATA" | base64 --decode > kubeconfig.yaml
-          microk8s.kubectl --kubeconfig=kubeconfig.yaml apply -f puck-deploy.yaml
+    - name: Kubectl tool installer
+      uses: Azure/setup-kubectl@v1
+  
+    - name: Setup kubectl
+      env: 
+        K8S_CONFIG: ${{ secrets.KUBERNETES_CONFIG_BASE_64 }}
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${K8S_CONFIG}" | base64 --decode > $HOME/.kube/config
+      
+    - name: Download Deploy
+      uses: actions/download-artifact@v2
+      with:
+        name: deploy
+      
+    - name: Apply pods
+      run: kubectl apply apply -f puck-deploy.yaml
+      
