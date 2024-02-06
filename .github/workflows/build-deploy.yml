@@ -70,5 +70,5 @@ jobs:
         echo "${K8S_CONFIG}" | base64 --decode > $HOME/.kube/config
       
     - name: Apply pods
-      run: kubectl apply apply -f puck-deploy.yaml
+      run: kubectl apply -f puck-deploy.yaml
       
