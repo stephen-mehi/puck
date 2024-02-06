@@ -71,7 +71,7 @@ jobs:
     - name: Download Deploy
       uses: actions/download-artifact@v2
       with:
-        name: deploy
+        name: docker
       
     - name: Apply pods
       run: kubectl apply apply -f puck-deploy.yaml
