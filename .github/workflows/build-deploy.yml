@@ -63,5 +63,5 @@ jobs:
       uses: Azure/setup-kubectl@v3
       
     - name: Apply pods
-      run: kubectl apply -f puck-deploy.yaml --kubeconfig=$HOME/.kube/config/kube.config
+      run: kubectl apply -f puck-deploy.yaml --kubeconfig=$HOME\.kube\config\kube.config
       
