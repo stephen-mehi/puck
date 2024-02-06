@@ -3,16 +3,16 @@ kind: Deployment
 metadata:
   name: puck-app
   labels:
-    app: aspnetcore
+    app: puck
 spec:
   replicas: 1  # Number of desired replicas (adjust as needed)
   selector:
     matchLabels:
-      app: aspnetcore
+      app: puck
   template:
     metadata:
       labels:
-        app: aspnetcore
+        app: puck
     spec:
       containers:
       - name: puck
@@ -23,10 +23,10 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: aspnetcore-service
+  name: puck-service
 spec:
   selector:
-    app: aspnetcore
+    app: puck
   ports:
     - protocol: TCP
       port: 80
