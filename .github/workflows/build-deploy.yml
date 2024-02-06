@@ -66,7 +66,7 @@ jobs:
       run: kubectl apply -f puck-deploy.yaml --kubeconfig=$HOME\.kube\config\client.config
     
     - name: Wait For Deployment To Start
-      run: sleep 10s
+      run: Start-Sleep -Seconds 10
       
     - name: Wait For Pods To Start
       run: kubectl wait --for=condition=ready pod -l app=puck --timeout=10m
