@@ -61,15 +61,7 @@ jobs:
     - uses: actions/checkout@v4 # Checkout the repository code
     - name: Kubectl tool installer
       uses: Azure/setup-kubectl@v3
-  
-    - name: Setup kubectl
-      run: kubectl config --kubeconfig $HOME/.kube/config/kube.config
-    - name: Set cluster
-      run: kubectl config set-cluster microk8s-cluster --server=http://192.168.1.9:16443
-    - name: Create context
-      run: kubectl config set-context microk8s --user=admin --cluster=microk8s-cluster
-    - name: Set context
-      run: kubectl config use-context microk8s 
+      
     - name: Apply pods
       run: kubectl apply -f puck-deploy.yaml
       
