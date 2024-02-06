@@ -68,11 +68,6 @@ jobs:
         mkdir -p $HOME/.kube
         echo "${K8S_CONFIG}" | base64 --decode > $HOME/.kube/config
       
-    - name: Download Deploy
-      uses: actions/download-artifact@v2
-      with:
-        name: docker
-      
     - name: Apply pods
       run: kubectl apply apply -f puck-deploy.yaml
       
