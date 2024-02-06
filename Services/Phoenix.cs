@@ -10,9 +10,8 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace puck.Phoenix
+namespace Puck.Services
 {
-
     public static class RangeMapper
     {
         public static double MapValueToRange(

@@ -1,6 +1,15 @@
+using Puck.Services;
+
 var builder = WebApplication.CreateBuilder(args);
 
+ITcpIOBusConnectionFactory connectFact = new PhoenixIOBusConnectionFactory();
+var phoenix = new PhoenixProxy(connectFact);
+
 // Add services to the container.
+builder
+    .Services
+    .AddSingleton(phoenix);
+    // .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
