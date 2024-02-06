@@ -1,0 +1,60 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3 # Checkout the repository code
+    - name: Build the Docker image
+      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+    - name: Setup .NET Core SDK  # Set up .NET Core SDK
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: '8.0.x'
+    
+    - name: Restore dependencies  # Restore project dependencies
+      run: dotnet restore
+
+    - name: Build application  # Build the ASP.NET Core application
+      run: dotnet build --configuration Release
+
+    - name: Run tests  # Run tests (if applicable)
+      run: dotnet test
+  docker:
+    runs-on: ubuntu-latest  # Specify the runner environment
+
+    needs: build  # Ensure that the 'build' job completes successfully before starting this job
+
+    steps:
+      - name: Checkout code  # Checkout the repository code
+        uses: actions/checkout@v2
+
+      - name: Build Docker image  # Build Docker image
+        run: docker build -t puck:latest .
+
+      - name: Push Docker image to registry  # Push Docker image to Docker registry
+        run: |
+          echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+          docker push your-image-name:latest
+
+  deploy:
+    runs-on: ubuntu-latest  # Specify the runner environment
+
+    needs: docker  # Ensure that the 'docker' job completes successfully before starting this job
+
+    steps:
+      - name: Checkout code  # Checkout the repository code
+        uses: actions/checkout@v2
+
+      - name: Deploy to production  # Deploy the Docker image to production
+        run: |
+          # Add deployment steps here (e.g., Kubernetes deployment, Docker Swarm deployment, etc.)
