@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aspnetcore-app
+  name: puck-app
   labels:
     app: aspnetcore
 spec:
