@@ -9,7 +9,7 @@ on:
 jobs:
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - uses: actions/checkout@v4 # Checkout the repository code
     
@@ -30,7 +30,7 @@ jobs:
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag puck:latest
   docker:
-    runs-on: ubuntu-latest  # Specify the runner environment
+    runs-on: self-hosted  # Specify the runner environment
 
     needs: build  # Ensure that the 'build' job completes successfully before starting this job
 
@@ -54,7 +54,7 @@ jobs:
     name: kubernetes deploy
     environment:
       name: dev
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: docker
     
     steps:
