@@ -59,6 +59,9 @@ jobs:
       - name: Checkout code  # Checkout the repository code
         uses: actions/checkout@v2
 
-      - name: Deploy to production  # Deploy the Docker image to production
+      - name: Deploy to MicroK8s
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBERNETES_CONFIG_BASE_64 }}
         run: |
-          # Add deployment steps here (e.g., Kubernetes deployment, Docker Swarm deployment, etc.)
+          echo "$KUBE_CONFIG_DATA" | base64 --decode > kubeconfig.yaml
+          microk8s.kubectl --kubeconfig=kubeconfig.yaml apply -f puck-deploy.yaml
