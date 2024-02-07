@@ -32,19 +32,15 @@ spec:
       port: 80
       targetPort: 80
 ---
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+apiVersion: v1
+kind: Service
 metadata:
-  name: aspnet-ingress
+  name: puck-service
 spec:
-  rules:
-    - host: puck.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: puck-service
-                port:
-                  number: 80
+  selector:
+    app: puck
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: NodePort  # Use NodePort for simplicity; consider LoadBalancer or Ingress for production
