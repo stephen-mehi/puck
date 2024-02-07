@@ -99,7 +99,7 @@ public class PhoenixProxy : IDisposable
         _connectAction =
             new Func<Task<IDisposableIOBus>>(() =>
                 _connectFactory.ConnectAsync(
-                "169.254.34.100",
+                "192.168.1.100",
                 TimeSpan.FromSeconds(3),
                 TimeSpan.FromSeconds(1),
                 new Dictionary<ushort, AnalogInputConfig>(),
