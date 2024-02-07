@@ -46,4 +46,4 @@ spec:
       nodePort: 30671
   type: NodePort  # Use NodePort for simplicity; consider LoadBalancer or Ingress for production
   externalIPs:
-    - 10.1.129.100
+    - 192.168.1.50
