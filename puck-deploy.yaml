@@ -18,7 +18,7 @@ spec:
       - name: puck
         image: smehi/puck:latest
         ports:
-        - containerPort: 80
+        - containerPort: 8080
 ---
 apiVersion: v1
 kind: Service
@@ -29,8 +29,8 @@ spec:
     app: puck
   ports:
     - protocol: TCP
-      port: 80
-      targetPort: 80
+      port: 8080
+      targetPort: 8080
 ---
 apiVersion: v1
 kind: Service
@@ -41,6 +41,6 @@ spec:
     app: puck
   ports:
     - protocol: TCP
-      port: 80
-      targetPort: 80
+      port: 8080
+      targetPort: 8080
   type: NodePort  # Use NodePort for simplicity; consider LoadBalancer or Ingress for production
