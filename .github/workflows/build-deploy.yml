@@ -9,12 +9,12 @@ on:
 jobs:
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-    - uses: actions/checkout@v3 # Checkout the repository code
+    - uses: actions/checkout@v4 # Checkout the repository code
     
     - name: Setup .NET Core SDK  # Set up .NET Core SDK
-      uses: actions/setup-dotnet@v1
+      uses: actions/setup-dotnet@v3
       with:
         dotnet-version: '8.0.x'
         
@@ -30,13 +30,13 @@ jobs:
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag puck:latest
   docker:
-    runs-on: ubuntu-latest  # Specify the runner environment
+    runs-on: self-hosted  # Specify the runner environment
 
     needs: build  # Ensure that the 'build' job completes successfully before starting this job
 
     steps:
       - name: Checkout code  # Checkout the repository code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -54,25 +54,20 @@ jobs:
     name: kubernetes deploy
     environment:
       name: dev
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: docker
     
     steps:
+    - uses: actions/checkout@v4 # Checkout the repository code
     - name: Kubectl tool installer
-      uses: Azure/setup-kubectl@v1
-  
-    - name: Setup kubectl
-      env: 
-        K8S_CONFIG: ${{ secrets.KUBERNETES_CONFIG_BASE_64 }}
-      run: |
-        mkdir -p $HOME/.kube
-        echo "${K8S_CONFIG}" | base64 --decode > $HOME/.kube/config
-      
-    - name: Download Deploy
-      uses: actions/download-artifact@v2
-      with:
-        name: docker
+      uses: Azure/setup-kubectl@v3
       
     - name: Apply pods
-      run: kubectl apply apply -f puck-deploy.yaml
+      run: kubectl apply -f puck-deploy.yaml --kubeconfig=$HOME\.kube\config\client.config
+    
+    - name: Wait For Deployment To Start
+      run: Start-Sleep -Seconds 10
+      
+    - name: Wait For Pods To Start
+      run: kubectl wait --for=condition=ready pod -l app=puck --timeout=10m --kubeconfig=$HOME\.kube\config\client.config
       
