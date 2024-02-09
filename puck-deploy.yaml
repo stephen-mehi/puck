@@ -19,6 +19,15 @@ spec:
         image: smehi/puck:latest
         ports:
         - containerPort: 8080
+        securityContext:
+            privileged: true   # Necessary for accessing devices
+          volumeMounts:
+            - mountPath: /dev/ttyUSB0
+              name: ttyusb
+      volumes:
+        - name: ttyusb
+          hostPath:
+            path: /dev/ttyUSB0  # Path to your COM port device on the host
 ---
 apiVersion: v1
 kind: Service
