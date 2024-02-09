@@ -21,9 +21,9 @@ spec:
         - containerPort: 8080
         securityContext:
             privileged: true   # Necessary for accessing devices
-          volumeMounts:
-            - mountPath: /dev/ttyUSB0
-              name: ttyusb
+        volumeMounts:
+          - mountPath: /dev/ttyUSB0
+            name: ttyusb
       volumes:
         - name: ttyusb
           hostPath:
