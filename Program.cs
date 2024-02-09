@@ -9,12 +9,20 @@ var phoenix = new PhoenixProxy(connectFact);
 builder
     .Services
     .AddSingleton(phoenix);
-    // .AddHostedService<SystemService>();
+// .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+builder.Services.AddLogging(builder =>
+{
+    builder
+    .ClearProviders()
+    .AddDebug()
+    .AddConsole();
+});
 
 var app = builder.Build();
 
