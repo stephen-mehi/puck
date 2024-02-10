@@ -17,6 +17,7 @@ spec:
       containers:
       - name: puck
         image: smehi/puck:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8080
         securityContext:
