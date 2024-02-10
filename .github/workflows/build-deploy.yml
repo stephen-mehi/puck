@@ -53,7 +53,7 @@ jobs:
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
         run: |
-          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')
+          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
           docker push smehi/puck:$tag
         
       - name: Update Kubernetes Manifest
