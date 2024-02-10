@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.IO.Ports;
 using Microsoft.AspNetCore.Mvc;
 using Puck.Services;
 
@@ -19,20 +20,20 @@ public class SystemController : ControllerBase
         _proxy = proxy;
     }
 
-    // [HttpGet]
-    // [Route("io-state")]
-    // public IActionResult GetIoStateAsync(CancellationToken ct = default)
-    // {
-    //     var state = new
-    //     {
-    //         DigitalInputState = _proxy.DigitalInputState,
-    //         DigitalOutputState = _proxy.DigitalOutputState,
-    //         AnalogInputState = _proxy.AnalogInputState,
-    //         AnalogOutputState = _proxy.AnalogOutputState
-    //     };
+    [HttpGet]
+    [Route("io-state")]
+    public IActionResult GetIoStateAsync(CancellationToken ct = default)
+    {
+        var state = new
+        {
+            DigitalInputState = _proxy.DigitalInputState,
+            DigitalOutputState = _proxy.DigitalOutputState,
+            AnalogInputState = _proxy.AnalogInputState,
+            AnalogOutputState = _proxy.AnalogOutputState
+        };
 
-    //     return Ok(state);
-    // }
+        return Ok(state);
+    }
 
     [HttpPost]
     [Route("digital-output")]
@@ -48,6 +49,13 @@ public class SystemController : ControllerBase
     [Route("temp-test")]
     public async Task<IActionResult> TestTempController(CancellationToken ct = default)
     {
+        var ports = SerialPort.GetPortNames();
+
+        foreach (var p in ports)
+        {
+            _logger.Log(LogLevel.Warning, p);
+        }
+
         var proxy = new TemperatureControllerProxy();
         var state = await proxy.Test();
 
