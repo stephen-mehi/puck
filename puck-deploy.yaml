@@ -54,3 +54,4 @@ spec:
       targetPort: 8080
       nodePort: 30671
   type: NodePort  # Use NodePort for simplicity; consider LoadBalancer or Ingress for production
+
