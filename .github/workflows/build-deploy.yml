@@ -28,7 +28,9 @@ jobs:
       run: dotnet test
       
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag puck:${GITHUB_SHA:0:7}-$(date +"%Y%m%d%H%M%S")
+      run: |
+        $tag = "smehi/puck:$((git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss'))"
+        docker build -t $tag .
   docker:
     runs-on: self-hosted  # Specify the runner environment
 
@@ -45,7 +47,9 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PAT }}
           
       - name: Build Docker image  # Build Docker image
-        run: docker build -t smehi/puck:${GITHUB_SHA:0:7}-$(date +"%Y%m%d%H%M%S") .
+        run: |
+          $tag = "smehi/puck:$((git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss'))"
+          docker build -t $tag .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
         run: docker push smehi/puck:${GITHUB_SHA:0:7}-$(date +"%Y%m%d%H%M%S")
