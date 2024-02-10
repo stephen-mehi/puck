@@ -57,7 +57,7 @@ jobs:
 
           $content = Get-Content -Path "C:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml" -Raw
           $newContent = $content -replace "puck:latest", $tag
-          $newContent | Set-Content -Path "p:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml"
+          $newContent | Set-Content -Path "C:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml"
 
   deploy:
     name: kubernetes deploy
