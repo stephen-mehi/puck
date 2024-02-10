@@ -28,7 +28,7 @@ jobs:
       run: dotnet test
       
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag puck:latest
+      run: docker build . --file Dockerfile --tag puck:${GITHUB_SHA:0:7}-$(date +"%Y%m%d%H%M%S")
   docker:
     runs-on: self-hosted  # Specify the runner environment
 
@@ -45,10 +45,16 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PAT }}
           
       - name: Build Docker image  # Build Docker image
-        run: docker build -t smehi/puck:latest .
+        run: docker build -t smehi/puck:${GITHUB_SHA:0:7}-$(date +"%Y%m%d%H%M%S") .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
-        run: docker push smehi/puck:latest
+        run: docker push smehi/puck:${GITHUB_SHA:0:7}-$(date +"%Y%m%d%H%M%S")
+        
+      - name: Update Kubernetes Manifest
+        run: |
+          $content = Get-Content -Path "C:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml" -Raw
+          $newContent = $content -replace "puck:latest", "puck:${env:GITHUB_SHA:0:7}-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $newContent | Set-Content -Path "p:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml"
 
   deploy:
     name: kubernetes deploy
