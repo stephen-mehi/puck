@@ -67,7 +67,6 @@ jobs:
     needs: docker
     
     steps:
-    - uses: actions/checkout@v4 # Checkout the repository code
     - name: Kubectl tool installer
       uses: Azure/setup-kubectl@v3
       
