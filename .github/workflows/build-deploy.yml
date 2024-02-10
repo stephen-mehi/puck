@@ -50,20 +50,13 @@ jobs:
           
       - name: Build Docker image  # Build Docker image
         run: |
-          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
           Write-Output $tag
-          docker build -t $tag .
+          docker build -t "smehi/$tag" .
+          docker push "smehi/$tag"
 
-      - name: Push Docker image to registry  # Push Docker image to Docker registry
-        run: |
-          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
-          Write-Output $tag
-          docker push $tag
-        
-      - name: Update Kubernetes Manifest
-        run: |
           $content = Get-Content -Path "C:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml" -Raw
-          $newContent = $content -replace "puck:latest", "puck:${env:GITHUB_SHA:0:7}-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $newContent = $content -replace "puck:latest", $tag
           $newContent | Set-Content -Path "p:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml"
 
   deploy:
