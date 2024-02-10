@@ -19,20 +19,20 @@ public class SystemController : ControllerBase
         _proxy = proxy;
     }
 
-    [HttpGet]
-    [Route("io-state")]
-    public IActionResult GetIoStateAsync(CancellationToken ct = default)
-    {
-        var state = new
-        {
-            DigitalInputState = _proxy.DigitalInputState,
-            DigitalOutputState = _proxy.DigitalOutputState,
-            AnalogInputState = _proxy.AnalogInputState,
-            AnalogOutputState = _proxy.AnalogOutputState
-        };
+    // [HttpGet]
+    // [Route("io-state")]
+    // public IActionResult GetIoStateAsync(CancellationToken ct = default)
+    // {
+    //     var state = new
+    //     {
+    //         DigitalInputState = _proxy.DigitalInputState,
+    //         DigitalOutputState = _proxy.DigitalOutputState,
+    //         AnalogInputState = _proxy.AnalogInputState,
+    //         AnalogOutputState = _proxy.AnalogOutputState
+    //     };
 
-        return Ok(state);
-    }
+    //     return Ok(state);
+    // }
 
     [HttpPost]
     [Route("digital-output")]
