@@ -23,7 +23,6 @@ public class SystemController : ControllerBase
     [Route("io-state")]
     public IActionResult GetIoStateAsync(CancellationToken ct = default)
     {
-        _logger.LogInformation("TESTTTINGGGGG");
         var state = new
         {
             DigitalInputState = _proxy.DigitalInputState,
@@ -44,4 +43,15 @@ public class SystemController : ControllerBase
 
         return Ok("Set digital output");
     }
+
+    [HttpGet]
+    [Route("temp-test")]
+    public async Task<IActionResult> TestTempController(CancellationToken ct = default)
+    {
+        var proxy = new TemperatureControllerProxy();
+        var state = await proxy.Test();
+
+        return Ok(state);
+    }
+
 }
