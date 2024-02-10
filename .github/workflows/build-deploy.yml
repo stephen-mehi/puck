@@ -28,7 +28,7 @@ jobs:
       run: dotnet test
       
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag puck:latest
+      run: docker build --no-cache . --file Dockerfile --tag puck:latest
   docker:
     runs-on: self-hosted  # Specify the runner environment
 
@@ -45,7 +45,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PAT }}
           
       - name: Build Docker image  # Build Docker image
-        run: docker build -t smehi/puck:latest .
+        run: docker build --no-cache -t smehi/puck:latest .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
         run: docker push smehi/puck:latest
