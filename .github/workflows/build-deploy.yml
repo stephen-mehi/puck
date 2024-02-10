@@ -29,7 +29,7 @@ jobs:
       
     - name: Build the Docker image
       run: |
-        $tag = "smehi/puck:$((git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss'))"
+        $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
         docker build -t $tag .
   docker:
     runs-on: self-hosted  # Specify the runner environment
@@ -48,7 +48,7 @@ jobs:
           
       - name: Build Docker image  # Build Docker image
         run: |
-          $tag = "smehi/puck:$((git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss'))"
+          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
           docker build -t $tag .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
