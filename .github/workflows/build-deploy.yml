@@ -30,7 +30,9 @@ jobs:
     - name: Build the Docker image
       run: |
         $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+        Write-Output $tag
         docker build -t $tag .
+        
   docker:
     runs-on: self-hosted  # Specify the runner environment
 
@@ -48,13 +50,15 @@ jobs:
           
       - name: Build Docker image  # Build Docker image
         run: |
-          $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          Write-Output $tag
           docker build -t $tag .
 
       - name: Push Docker image to registry  # Push Docker image to Docker registry
         run: |
-          $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
-          docker push smehi/$tag
+          $tag = "smehi/puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          Write-Output $tag
+          docker push $tag
         
       - name: Update Kubernetes Manifest
         run: |
