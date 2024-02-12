@@ -33,7 +33,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseAuthorization();
+// app.UseAuthorization();
+app.UseCors(x =>
+{
+    x
+    .AllowAnyMethod()
+    .AllowAnyHeader()
+    .SetIsOriginAllowed(y => true)
+    .AllowCredentials();
+});
 
 app.MapControllers();
 
