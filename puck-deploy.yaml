@@ -29,6 +29,9 @@ spec:
         - name: ttyusb
           hostPath:
             path: /dev/ttyUSB0  # Path to your COM port device on the host
+      devices:
+      - name: ttyusb
+        devicePath: /dev/ttyUSB0
 ---
 apiVersion: v1
 kind: Service
