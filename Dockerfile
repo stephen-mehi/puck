@@ -3,6 +3,9 @@ ENV ASPNETCORE_ENVIRONMENT=Development
 WORKDIR /app
 EXPOSE 8080
 
+RUN sudo apt update \
+sudo apt install libftdi1
+
 USER app
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG configuration=Release
