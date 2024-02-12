@@ -11,11 +11,14 @@ public class SystemController : ControllerBase
 {
     private readonly ILogger<SystemController> _logger;
     private readonly PhoenixProxy _proxy;
+    private readonly TemperatureControllerProxy _tcProxy;
 
     public SystemController(
         ILogger<SystemController> logger,
+        TemperatureControllerProxy tcProxy,
         PhoenixProxy proxy)
     {
+        _tcProxy = tcProxy;
         _logger = logger;
         _proxy = proxy;
     }
@@ -49,15 +52,7 @@ public class SystemController : ControllerBase
     [Route("temp-test")]
     public async Task<IActionResult> TestTempController(CancellationToken ct = default)
     {
-        var ports = SerialPort.GetPortNames();
-
-        foreach (var p in ports)
-        {
-            _logger.Log(LogLevel.Warning, p);
-        }
-
-        var proxy = new TemperatureControllerProxy();
-        var state = await proxy.Test();
+        var state = await _tcProxy.Test();
 
         return Ok(state);
     }

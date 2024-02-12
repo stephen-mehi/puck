@@ -5,10 +5,13 @@ var builder = WebApplication.CreateBuilder(args);
 ITcpIOBusConnectionFactory connectFact = new PhoenixIOBusConnectionFactory();
 var phoenix = new PhoenixProxy(connectFact);
 
+var tcProxy = new TemperatureControllerProxy();
+
 // Add services to the container.
 builder
     .Services
-    .AddSingleton(phoenix);
+    .AddSingleton(phoenix)
+    .AddSingleton(tcProxy);
 // .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
