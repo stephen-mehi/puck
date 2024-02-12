@@ -5,6 +5,9 @@ EXPOSE 8080
 
 RUN apt-get update && apt-get install -y libftdi1
 
+# Add the app user to the dialout group
+RUN usermod -aG dialout app
+
 USER app
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG configuration=Release
