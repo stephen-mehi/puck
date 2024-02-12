@@ -74,35 +74,37 @@ public class FujiPXFDriverProvider
             WriteTimeout = (int)portConfig.Timeout.TotalMilliseconds
         };
 
-        var connectionTask = Task.Run(() => port.Open(), ct);
+        port.Open();
 
-        if (await Task.WhenAny(connectionTask, Task.Delay(portConfig.Timeout)) != connectionTask)
-        {
-            try
-            {
-                port.Dispose();
-                port = null;
-            }
-            catch (Exception) { }
+        // var connectionTask = Task.Run(() => port.Open(), ct);
 
-            throw new TimeoutException(
-                $"Timed out after {portConfig.Timeout.TotalSeconds} seconds while trying to connect to " +
-                $"PXF Temperature Controller over COM port: {portConfig.PortName}");
-        }
+        // if (await Task.WhenAny(connectionTask, Task.Delay(portConfig.Timeout)) != connectionTask)
+        // {
+        //     try
+        //     {
+        //         port.Dispose();
+        //         port = null;
+        //     }
+        //     catch (Exception) { }
 
-        if (!port.IsOpen)
-        {
-            try
-            {
-                port.Dispose();
-                port = null;
-            }
-            catch (Exception) { }
+        //     throw new TimeoutException(
+        //         $"Timed out after {portConfig.Timeout.TotalSeconds} seconds while trying to connect to " +
+        //         $"PXF Temperature Controller over COM port: {portConfig.PortName}");
+        // }
 
-            throw new Exception(
-                $"Failed to connect to PXF Temperature Controller at port: {portConfig.PortName}. " +
-                $"Serial port connection state was not open after connection.");
-        }
+        // if (!port.IsOpen)
+        // {
+        //     try
+        //     {
+        //         port.Dispose();
+        //         port = null;
+        //     }
+        //     catch (Exception) { }
+
+        //     throw new Exception(
+        //         $"Failed to connect to PXF Temperature Controller at port: {portConfig.PortName}. " +
+        //         $"Serial port connection state was not open after connection.");
+        // }
 
         // Create Modbus master
         var factory = new ModbusFactory();
