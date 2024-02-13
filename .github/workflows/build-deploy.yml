@@ -77,5 +77,5 @@ jobs:
       run: Start-Sleep -Seconds 10
       
     - name: Wait For Pods To Start
-      run: kubectl wait --for=condition=ready pod -l app=puck --timeout=10m --kubeconfig=$HOME\.kube\config\client.config
+      run: kubectl wait --for=condition=ready pod -l app=puck --timeout=1m --kubeconfig=$HOME\.kube\config\client.config
       
