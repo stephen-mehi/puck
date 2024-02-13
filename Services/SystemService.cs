@@ -6,14 +6,18 @@ public class SystemService : IHostedService, IDisposable
     private bool _isDisposed;
     private readonly ILogger<SystemService> _logger;
     private Task? _workTask;
-    private readonly PhoenixProxy _proxy;
+    private readonly PhoenixProxy _ioProxy;
+    private readonly TemperatureControllerProxy _tempProxy;
     private readonly CancellationTokenSource _ctSrc;
 
     public SystemService(
         ILogger<SystemService> logger,
-        PhoenixProxy proxy)
+        PhoenixProxy ioProxy,
+        TemperatureControllerProxy tempProxy)
     {
-        _proxy = proxy;
+        _tempProxy = tempProxy;
+        _ioProxy = ioProxy;
+        _ioProxy = ioProxy;
         _logger = logger;
         _ctSrc = new CancellationTokenSource();
     }
@@ -30,7 +34,9 @@ public class SystemService : IHostedService, IDisposable
                     //ESPRESSO CONTROL LOGIC SCAN HERE
                     while (!_ctSrc.IsCancellationRequested)
                     {
-                        Task.Delay(500, _ctSrc.Token);
+
+
+                        Task.Delay(25, _ctSrc.Token);
                     }
                 }, _ctSrc.Token);
         }

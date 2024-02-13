@@ -10,17 +10,21 @@ public class TemperatureControllerProxy
     private readonly CancellationTokenSource _ctSrc;
     private readonly Task _task;
     private bool _isDisposed;
+    private readonly ILogger<TemperatureControllerProxy> _logger;
 
     private double? _processValue = null;
     private double? _setValue = null;
 
 
     public TemperatureControllerProxy(
-        FujiPXFDriverProvider prov)
+        FujiPXFDriverProvider prov,
+        ILogger<TemperatureControllerProxy> logger)
     {
         _prov = prov;
         _lock = new SemaphoreSlim(1, 1);
         _ctSrc = new CancellationTokenSource();
+
+        _logger = logger;
 
         var portConfig = new
             FujiPXFDriverPortConfiguration(
@@ -72,13 +76,13 @@ public class TemperatureControllerProxy
                     _lock.Release();
 
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
-
+                    _logger.LogError(e.Message);
                 }
                 finally
                 {
-                    await Task.Delay(250, ct);
+                    await Task.Delay(50, ct);
                 }
             }
         });

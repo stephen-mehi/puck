@@ -2,16 +2,14 @@ using Puck.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-ITcpIOBusConnectionFactory connectFact = new PhoenixIOBusConnectionFactory();
-var phoenix = new PhoenixProxy(connectFact);
-var tcProxy = new TemperatureControllerProxy(new FujiPXFDriverProvider());
-
 // Add services to the container.
 builder
     .Services
-    .AddSingleton(phoenix)
-    .AddSingleton(tcProxy);
-// .AddHostedService<SystemService>();
+    .AddSingleton<PhoenixIOBusConnectionFactory>()
+    .AddSingleton<PhoenixProxy>()
+    .AddSingleton<FujiPXFDriverProvider>()
+    .AddSingleton<TemperatureControllerProxy>()
+    .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle

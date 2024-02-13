@@ -44,10 +44,13 @@ public class PhoenixProxy : IDisposable
     private readonly IReadOnlyList<ushort> _digitalOutputs;
     private readonly IReadOnlyList<ushort> _analogInputs;
     private readonly IReadOnlyList<ushort> _analogOutputs;
+    private readonly ILogger<PhoenixProxy> _logger;
 
     public PhoenixProxy(
-        ITcpIOBusConnectionFactory connectFactory)
+        ITcpIOBusConnectionFactory connectFactory,
+        ILogger<PhoenixProxy> logger)
     {
+        _logger = logger;
         _ctSrc = new CancellationTokenSource();
 
         _digitalInputs =
@@ -163,9 +166,9 @@ public class PhoenixProxy : IDisposable
                     foreach (var kvp in aOutputs)
                         _analogOutputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
-
+                    _logger.LogError(e.Message);
                 }
                 finally
                 {
