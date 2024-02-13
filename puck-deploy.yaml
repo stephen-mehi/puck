@@ -53,18 +53,6 @@ spec:
     - protocol: TCP
       port: 8080
       targetPort: 8080
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: puck-service
-spec:
-  selector:
-    app: puck
-  ports:
-    - protocol: TCP
-      port: 8080
-      targetPort: 8080
       nodePort: 30671
   type: NodePort  # Use NodePort for simplicity; consider LoadBalancer or Ingress for production
 
