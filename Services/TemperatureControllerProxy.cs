@@ -2,12 +2,6 @@ namespace Puck.Services;
 
 public class TemperatureControllerProxy
 {
-    private readonly FujiPXFDriver _driver;
-    public TemperatureControllerProxy()
-    {
-
-    }
-
     public async Task<double> Test()
     {
         var portConfig = new
@@ -17,7 +11,7 @@ public class TemperatureControllerProxy
 
         using (var driver = await (new FujiPXFDriverProvider()).ConnectAsync(portConfig))
         {
-            var val = await driver.GetProcessValueAsync();
+            var val = await driver.GetSetValueAsync();
             return val;
         }
     }
