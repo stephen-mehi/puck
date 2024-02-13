@@ -66,6 +66,13 @@ public class SystemController : ControllerBase
     [Route("temp-test")]
     public async Task<IActionResult> TestTempController(CancellationToken ct = default)
     {
+        var test = SerialPort.GetPortNames();
+        
+        foreach (var t in test)
+        {
+            _logger.Log(LogLevel.Warning, t);
+        }
+
         var state = await _tcProxy.Test();
 
         return Ok(state);
