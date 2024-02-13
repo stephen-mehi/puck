@@ -70,7 +70,7 @@ public class SystemController : ControllerBase
         
         foreach (var t in test)
         {
-            _logger.Log(LogLevel.Warning, t);
+            _logger.Log(LogLevel.Warning, $"PORT*******************: {t}");
         }
 
         var state = await _tcProxy.Test();
