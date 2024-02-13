@@ -25,6 +25,7 @@ builder.Services.AddLogging(builder =>
     .ClearProviders()
     .AddDebug()
     .AddConsole();
+    
 });
 
 var app = builder.Build();
