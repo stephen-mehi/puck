@@ -68,7 +68,7 @@ public class SystemController : ControllerBase
     public IActionResult GetSetPoint(CancellationToken ct = default)
     {
         var sp = _tcProxy.GetSetValue();
-        return Ok(sp);
+        return Ok(new { sp });
     }
 
     [HttpGet]
@@ -76,7 +76,7 @@ public class SystemController : ControllerBase
     public IActionResult GetProcessValue(CancellationToken ct = default)
     {
         var pv = _tcProxy.GetProcessValue();
-        return Ok(pv);
+        return Ok(new { pv });
     }
 
     [HttpPost]

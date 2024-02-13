@@ -163,6 +163,10 @@ public class PhoenixProxy : IDisposable
                     foreach (var kvp in aOutputs)
                         _analogOutputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
                 }
+                catch (Exception)
+                {
+
+                }
                 finally
                 {
                     await Task.Delay(250, ct);

@@ -5,8 +5,11 @@ public class TemperatureControllerProxy
     private readonly FujiPXFDriverProvider _prov;
     private FujiPXFDriver _proxy;
     private Func<Task<FujiPXFDriver>> _connectAction;
-    private readonly SemaphoreSlim _lock = new SemaphoreSlim(1, 1);
+    private readonly SemaphoreSlim _lock;
 
+    private readonly CancellationTokenSource _ctSrc;
+    private readonly Task _task;
+    private bool _isDisposed;
 
     private double? _processValue = null;
     private double? _setValue = null;
@@ -16,6 +19,8 @@ public class TemperatureControllerProxy
         FujiPXFDriverProvider prov)
     {
         _prov = prov;
+        _lock = new SemaphoreSlim(1, 1);
+        _ctSrc = new CancellationTokenSource();
 
         var portConfig = new
             FujiPXFDriverPortConfiguration(
@@ -26,6 +31,8 @@ public class TemperatureControllerProxy
         {
             return await (new FujiPXFDriverProvider()).ConnectAsync(portConfig);
         });
+
+        _task = StartReadLoop(_ctSrc.Token);
     }
 
     private Task StartReadLoop(CancellationToken ct)
@@ -65,6 +72,10 @@ public class TemperatureControllerProxy
                     _lock.Release();
 
                 }
+                catch (Exception)
+                {
+
+                }
                 finally
                 {
                     await Task.Delay(250, ct);
@@ -96,4 +107,32 @@ public class TemperatureControllerProxy
 
     public double? GetSetValue() => _setValue;
     public double? GetProcessValue() => _processValue;
+
+
+    #region IDisposable
+
+    protected void Dispose(bool disposing)
+    {
+        if (_isDisposed)
+            return;
+
+        if (disposing)
+        {
+            _ctSrc.Cancel();
+            _task.Wait(3000);
+            _proxy?.Dispose();
+        }
+
+        _isDisposed = true;
+    }
+
+    public void Dispose()
+    {
+        // Dispose of unmanaged resources.
+        Dispose(true);
+        // Suppress finalization.
+        GC.SuppressFinalize(this);
+    }
+
+    #endregion
 }
