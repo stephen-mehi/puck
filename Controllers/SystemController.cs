@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.IO.Ports;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
 using Puck.Services;
 
 namespace Puck.Controllers;
@@ -63,19 +64,29 @@ public class SystemController : ControllerBase
     }
 
     [HttpGet]
-    [Route("temp-test")]
-    public async Task<IActionResult> TestTempController(CancellationToken ct = default)
+    [Route("get-setpoint")]
+    public IActionResult GetSetPoint(CancellationToken ct = default)
     {
-        var test = SerialPort.GetPortNames();
-        
-        foreach (var t in test)
-        {
-            _logger.Log(LogLevel.Information, $"PORT1*******************: {t}");
-        }
+        var sp = _tcProxy.GetSetValue();
+        return Ok(sp);
+    }
 
-        var state = await _tcProxy.Test();
+    [HttpGet]
+    [Route("get-process-value")]
+    public IActionResult GetProcessValue(CancellationToken ct = default)
+    {
+        var pv = _tcProxy.GetProcessValue();
+        return Ok(pv);
+    }
 
-        return Ok(state);
+    [HttpPost]
+    [Route("set-setpoint")]
+    public async Task<IActionResult> SetSetPoint(CancellationToken ct = default)
+    {
+        var current = _tcProxy.GetSetValue();
+        var next = current == 100 ? 60 : 100;
+        await _tcProxy.SetSetPointAsync(next, ct);
+        return Ok();
     }
 
 }

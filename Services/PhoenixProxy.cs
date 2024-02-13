@@ -106,7 +106,7 @@ public class PhoenixProxy : IDisposable
                 new Dictionary<ushort, AnalogMeasurementRange>(),
                 ct: _ctSrc.Token));
 
-        _connectionLoop = StartConnectionLoop(_ctSrc.Token);
+        _connectionLoop = StartReadLoop(_ctSrc.Token);
     }
 
     private readonly Dictionary<ushort, DigitalIoState?> _digitalInputState;
@@ -120,7 +120,7 @@ public class PhoenixProxy : IDisposable
     public IReadOnlyDictionary<ushort, AnalogIoState?> AnalogOutputState => _analogOutputState;
 
 
-    private Task StartConnectionLoop(CancellationToken ct)
+    private Task StartReadLoop(CancellationToken ct)
     {
         return Task.Run(async () =>
         {
@@ -163,13 +163,9 @@ public class PhoenixProxy : IDisposable
                     foreach (var kvp in aOutputs)
                         _analogOutputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
                 }
-                catch (Exception e)
-                {
-
-                }
                 finally
                 {
-                    await Task.Delay(500, ct);
+                    await Task.Delay(250, ct);
                 }
             }
 
