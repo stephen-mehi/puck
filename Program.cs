@@ -5,7 +5,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder
     .Services
-    .AddSingleton<PhoenixIOBusConnectionFactory>()
+    .AddSingleton<ITcpIOBusConnectionFactory, PhoenixIOBusConnectionFactory>()
     .AddSingleton<PhoenixProxy>()
     .AddSingleton<FujiPXFDriverProvider>()
     .AddSingleton<TemperatureControllerProxy>()
