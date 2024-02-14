@@ -181,10 +181,24 @@ public class PhoenixProxy : IDisposable
 
     public async Task SetDigitalOutputStateAsync(
         ushort index,
-         bool state,
-         CancellationToken ct)
+        bool state,
+        CancellationToken ct)
     {
+        if (_phoenix == null)
+            throw new Exception($"No phoenix connection");
+
         await _phoenix.WriteDigitalOutputAsync(index, state, ct);
+    }
+
+    public async Task SetAnalogOutputStateAsync(
+        ushort index,
+        double state,
+        CancellationToken ct)
+    {
+        if (_phoenix == null)
+            throw new Exception($"No phoenix connection");
+
+        await _phoenix.WriteAnalogOutputAsync(index, state, ct);
     }
 
 

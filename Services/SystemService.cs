@@ -34,9 +34,18 @@ public class SystemService : IHostedService, IDisposable
                     //ESPRESSO CONTROL LOGIC SCAN HERE
                     while (!_ctSrc.IsCancellationRequested)
                     {
-                        if ()
-
-                        Task.Delay(25, _ctSrc.Token);
+                        try
+                        {
+                            if()
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError($"Failed in control loop within {nameof(SystemService)}: {e.Message}");
+                        }
+                        finally
+                        {
+                            Task.Delay(10, _ctSrc.Token);
+                        }
                     }
                 }, _ctSrc.Token);
         }
