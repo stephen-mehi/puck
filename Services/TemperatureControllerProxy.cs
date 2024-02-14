@@ -82,7 +82,7 @@ public class TemperatureControllerProxy
                 }
                 finally
                 {
-                    await Task.Delay(10, ct);
+                    await Task.Delay(50, ct);
                 }
             }
         });
