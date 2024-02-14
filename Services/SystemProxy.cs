@@ -62,7 +62,7 @@ namespace puck.Services
                 {
                     try
                     {
-                        if (_runLock.CurrentCount > 0 && GetRunState() == RunState.Idle)
+                        if (_runLock.CurrentCount == 0 && GetRunState() == RunState.Idle)
                         {
                             _logger.LogInformation("Cancelling mid-process run");
 
@@ -81,7 +81,7 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(1000, combineCtSrc.Token);
+                        await Task.Delay(5000, combineCtSrc.Token);
                     }
                 }
             });
@@ -117,7 +117,7 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(1000, combineCtSrc.Token);
+                        await Task.Delay(5000, combineCtSrc.Token);
                     }
                 }
             });
@@ -225,7 +225,7 @@ namespace puck.Services
             Func<Task> action,
             CancellationToken ct)
         {
-            if (_runLock.CurrentCount > 0)
+            if (_runLock.CurrentCount == 0)
                 throw new Exception("Cannot execute operation while run is in process");
 
             await _systemLock.WaitAsync(ct);
