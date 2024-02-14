@@ -108,6 +108,15 @@ namespace puck.Services
             return temp;
         }
 
+        public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
+        {
+            return _tempProxy.SetSetPointAsync(setpoint, ct);
+        }
+
+        //public Task ApplyPumpSpeedAsync(double speed, CancellationToken ct)
+        //{
+        //}
+
         private double MapValueToRange(
             double value,
             double sourceRangeMin,
