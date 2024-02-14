@@ -168,7 +168,7 @@ public class PhoenixProxy : IDisposable
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e.Message);
+                    _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in {nameof(StartReadLoop)}: {e.Message}");
                 }
                 finally
                 {

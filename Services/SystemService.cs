@@ -4,8 +4,8 @@ namespace Puck.Services;
 public class SystemService : IHostedService, IDisposable
 {
     private bool _isDisposed;
-    private readonly ILogger<SystemService> _logger;
     private Task? _workTask;
+    private readonly ILogger<SystemService> _logger;
     private readonly PhoenixProxy _ioProxy;
     private readonly TemperatureControllerProxy _tempProxy;
     private readonly CancellationTokenSource _ctSrc;
@@ -34,7 +34,7 @@ public class SystemService : IHostedService, IDisposable
                     //ESPRESSO CONTROL LOGIC SCAN HERE
                     while (!_ctSrc.IsCancellationRequested)
                     {
-
+                        if ()
 
                         Task.Delay(25, _ctSrc.Token);
                     }

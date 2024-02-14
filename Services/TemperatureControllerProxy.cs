@@ -78,7 +78,7 @@ public class TemperatureControllerProxy
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e.Message);
+                    _logger.LogError(e, $"Error within {nameof(TemperatureControllerProxy)} in {nameof(StartReadLoop)}: {e.Message}");
                 }
                 finally
                 {
