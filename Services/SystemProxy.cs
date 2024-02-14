@@ -81,7 +81,7 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(10, combineCtSrc.Token);
+                        await Task.Delay(1000, combineCtSrc.Token);
                     }
                 }
             });
@@ -117,7 +117,7 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(10, combineCtSrc.Token);
+                        await Task.Delay(1000, combineCtSrc.Token);
                     }
                 }
             });
@@ -166,8 +166,8 @@ namespace puck.Services
 
         public RunState GetRunState()
         {
-            if (!_ioProxy.DigitalInputState.TryGetValue(0, out var val))
-                throw new Exception($"Error in {nameof(GetRunState)} within {nameof(SystemProxy)}. No digital input found with index 0");
+            if (!_ioProxy.DigitalInputState.TryGetValue(1, out var val))
+                throw new Exception($"Error in {nameof(GetRunState)} within {nameof(SystemProxy)}. No digital input found with index 1");
 
             if (!val.HasValue)
                 return RunState.None;
@@ -180,27 +180,27 @@ namespace puck.Services
 
         public ValveState GetRecirculationValveState()
         {
-            var state = GetValveState(0);
+            var state = GetValveState(1);
             return state;
         }
 
         public ValveState GetGroupHeadValveState()
         {
-            var state = GetValveState(1);
+            var state = GetValveState(2);
             return state;
         }
 
 
         public double? GetPumpSpeedSetting()
         {
-            var pumpSpeed = GetAnalogInputState(1);
+            var pumpSpeed = GetAnalogInputState(2);
 
             return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
         }
 
         public double? GetGroupHeadPressure()
         {
-            var pumpSpeed = GetAnalogInputState(0);
+            var pumpSpeed = GetAnalogInputState(1);
 
             return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
         }
@@ -247,31 +247,31 @@ namespace puck.Services
 
         public Task ApplyPumpSpeedAsync(double speed, CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(0, speed, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(1, speed, ct), ct);
         }
 
         public Task StopPumpAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(0, 0, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(1, 0, ct), ct);
         }
 
         public Task SetGroupHeadValveStateOpenAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, true, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
         }
         public Task SetGroupHeadValveStateClosedAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, false, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, false, ct), ct);
         }
 
         public Task SetRecirculationValveStateOpenAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(0, true, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, true, ct), ct);
         }
 
         public Task SetRecirculationValveStateClosedAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(0, false, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, false, ct), ct);
         }
 
         public Task SetAllIdleAsync(CancellationToken ct)
@@ -300,7 +300,7 @@ namespace puck.Services
             if (disposing)
             {
                 _ctSrc.Cancel();
-                _scanTask.Wait(5000);
+                _scanTask?.Wait(5000);
                 _ioProxy?.Dispose();
                 _tempProxy?.Dispose();
             }
