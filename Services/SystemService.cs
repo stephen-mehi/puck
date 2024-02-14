@@ -1,4 +1,6 @@
 
+using puck.Services;
+
 namespace Puck.Services;
 
 public class SystemService : IHostedService, IDisposable
@@ -6,18 +8,14 @@ public class SystemService : IHostedService, IDisposable
     private bool _isDisposed;
     private Task? _workTask;
     private readonly ILogger<SystemService> _logger;
-    private readonly PhoenixProxy _ioProxy;
-    private readonly TemperatureControllerProxy _tempProxy;
+    private readonly SystemProxy _proxy;
     private readonly CancellationTokenSource _ctSrc;
 
     public SystemService(
         ILogger<SystemService> logger,
-        PhoenixProxy ioProxy,
-        TemperatureControllerProxy tempProxy)
+        SystemProxy proxy)
     {
-        _tempProxy = tempProxy;
-        _ioProxy = ioProxy;
-        _ioProxy = ioProxy;
+        _proxy = proxy;
         _logger = logger;
         _ctSrc = new CancellationTokenSource();
     }
@@ -27,29 +25,8 @@ public class SystemService : IHostedService, IDisposable
         _logger.LogInformation("Background service is starting.");
 
         if (_workTask == null)
-        {
-            _workTask =
-                Task.Run(() =>
-                {
-                    //ESPRESSO CONTROL LOGIC SCAN HERE
-                    while (!_ctSrc.IsCancellationRequested)
-                    {
-                        try
-                        {
-                            if()
-                        }
-                        catch (Exception e)
-                        {
-                            _logger.LogError($"Failed in control loop within {nameof(SystemService)}: {e.Message}");
-                        }
-                        finally
-                        {
-                            Task.Delay(10, _ctSrc.Token);
-                        }
-                    }
-                }, _ctSrc.Token);
-        }
-
+            _workTask = _proxy.StartRunScan(_ctSrc.Token);
+            
         return Task.CompletedTask;
     }
 
@@ -74,7 +51,7 @@ public class SystemService : IHostedService, IDisposable
             if(!_ctSrc.IsCancellationRequested)
             {
                 _ctSrc.Cancel();
-                _workTask?.Wait(3000);
+                _workTask?.Wait(5000);
                 _ctSrc.Dispose();
             }
         }

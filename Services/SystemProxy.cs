@@ -26,8 +26,9 @@ namespace puck.Services
         private readonly CancellationTokenSource _ctSrc;
         private readonly SemaphoreSlim _systemLock;
         private readonly SemaphoreSlim _runLock;
+        private int _started = 0;
+        private Task? _scanTask;
 
-        private readonly Task _scanTask;
         private bool _isDisposed;
 
         public SystemProxy(
@@ -41,28 +42,37 @@ namespace puck.Services
             _systemLock = new SemaphoreSlim(1, 1);
             _runLock = new SemaphoreSlim(1, 1);
             _ctSrc = new CancellationTokenSource();
-            _scanTask = StartRunScan(_ctSrc.Token);
         }
 
         public Task StartRunScan(CancellationToken ct)
         {
+            _logger.LogInformation("Started run scan");
+
+            if (Interlocked.Exchange(ref _started, 1) == 1)
+                throw new Exception("Cannot start run scan if already started");
+
+            var combineCtSrc = CancellationTokenSource.CreateLinkedTokenSource(ct, _ctSrc.Token);
+
             CancellationTokenSource runStopSrc = new CancellationTokenSource();
 
             var runStateScanTask = Task.Run(async () =>
             {
                 //ESPRESSO CONTROL LOGIC SCAN HERE
-                while (!_ctSrc.IsCancellationRequested)
+                while (!combineCtSrc.IsCancellationRequested)
                 {
                     try
                     {
-                        if(_runLock.CurrentCount > 0 && GetRunState() == RunState.Idle)
+                        if (_runLock.CurrentCount > 0 && GetRunState() == RunState.Idle)
                         {
+                            _logger.LogInformation("Cancelling mid-process run");
+
                             //cancel run process and wait for it to release run lock
                             runStopSrc.Cancel();
                             runStopSrc.Dispose();
                             runStopSrc = new CancellationTokenSource();
 
-                            await _runLock.WaitAsync(ct);
+                            await _runLock.WaitAsync(combineCtSrc.Token);
+                            _runLock.Release();
                         }
                     }
                     catch (Exception e)
@@ -71,25 +81,28 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(10, _ctSrc.Token);
+                        await Task.Delay(10, combineCtSrc.Token);
                     }
                 }
             });
 
             var scanTask = Task.Run(async () =>
             {
-                while (!_ctSrc.IsCancellationRequested)
+                while (!combineCtSrc.IsCancellationRequested)
                 {
                     try
                     {
-                        if(GetRunState() == RunState.Run)
+                        if (GetRunState() == RunState.Run)
                         {
-                            await _runLock.WaitAsync(ct);
-                            await _systemLock.WaitAsync(ct);
+                            _logger.LogInformation("Run starting");
+
+                            await _runLock.WaitAsync(combineCtSrc.Token);
+                            await _systemLock.WaitAsync(combineCtSrc.Token);
 
                             try
                             {
                                 //ESPRESSO CONTROL LOGIC SCAN HERE PASS RUNSTOP TOKEN TO ALL HERE
+
                             }
                             finally
                             {
@@ -104,15 +117,14 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(10, _ctSrc.Token);
+                        await Task.Delay(10, combineCtSrc.Token);
                     }
                 }
             });
 
-            return Task.WhenAll(scanTask, runStateScanTask);
+            _scanTask = Task.WhenAll(scanTask, runStateScanTask);
+            return _scanTask;
         }
-
-
 
         private AnalogIoState? GetAnalogInputState(ushort index)
         {
@@ -181,10 +193,18 @@ namespace puck.Services
 
         public double? GetPumpSpeedSetting()
         {
+            var pumpSpeed = GetAnalogInputState(1);
+
+            return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
+        }
+
+        public double? GetGroupHeadPressure()
+        {
             var pumpSpeed = GetAnalogInputState(0);
 
             return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
         }
+
 
         public double? GetProcessTemperature()
         {
@@ -200,46 +220,75 @@ namespace puck.Services
             return temp;
         }
 
+
+        private async Task ExecuteSystemActionAsync(
+            Func<Task> action,
+            CancellationToken ct)
+        {
+            if (_runLock.CurrentCount > 0)
+                throw new Exception("Cannot execute operation while run is in process");
+
+            await _systemLock.WaitAsync(ct);
+
+            try
+            {
+                await action();
+            }
+            finally
+            {
+                _systemLock.Release();
+            }
+        }
+
         public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
         {
-            return _tempProxy.SetSetPointAsync(setpoint, ct);
+            return ExecuteSystemActionAsync(() => _tempProxy.SetSetPointAsync(setpoint, ct), ct);
         }
 
         public Task ApplyPumpSpeedAsync(double speed, CancellationToken ct)
         {
-            return _ioProxy.SetAnalogOutputStateAsync(0, speed, ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(0, speed, ct), ct);
         }
 
         public Task StopPumpAsync(CancellationToken ct)
         {
-            return _ioProxy.SetAnalogOutputStateAsync(0, 0, ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(0, 0, ct), ct);
         }
 
         public Task SetGroupHeadValveStateOpenAsync(CancellationToken ct)
         {
-            return _ioProxy.SetDigitalOutputStateAsync(1, true, ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, true, ct), ct);
         }
         public Task SetGroupHeadValveStateClosedAsync(CancellationToken ct)
         {
-            return _ioProxy.SetDigitalOutputStateAsync(1, false, ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, false, ct), ct);
         }
 
         public Task SetRecirculationValveStateOpenAsync(CancellationToken ct)
         {
-            return _ioProxy.SetDigitalOutputStateAsync(0, true, ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(0, true, ct), ct);
         }
 
         public Task SetRecirculationValveStateClosedAsync(CancellationToken ct)
         {
-            return _ioProxy.SetDigitalOutputStateAsync(0, false, ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(0, false, ct), ct);
         }
 
         public Task SetAllIdleAsync(CancellationToken ct)
         {
+            return ExecuteSystemActionAsync(async () =>
+            {
 
+                await StopPumpAsync(ct);
+                await SetRecirculationValveStateOpenAsync(ct);
+                await Task.Delay(250, ct);
+                await SetGroupHeadValveStateClosedAsync(ct);
+                await SetRecirculationValveStateClosedAsync(ct);
+
+            }, ct);
         }
 
-        
+
 
         #region IDisposable
 

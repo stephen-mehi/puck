@@ -1,3 +1,4 @@
+using puck.Services;
 using Puck.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -9,6 +10,7 @@ builder
     .AddSingleton<PhoenixProxy>()
     .AddSingleton<FujiPXFDriverProvider>()
     .AddSingleton<TemperatureControllerProxy>()
+    .AddSingleton<SystemProxy>()
     .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
