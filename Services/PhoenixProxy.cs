@@ -99,14 +99,31 @@ public class PhoenixProxy : IDisposable
 
         _deviceLock = new SemaphoreSlim(1, 1);
         _connectFactory = connectFactory;
+
+        var aiconfig =
+            new Dictionary<ushort, AnalogInputConfig>()
+            {
+                { 1, new AnalogInputConfig(AnalogMeasurementRange.FourToTwentyMilliamps, SampleAverageAmount.Four) },
+                { 2, new AnalogInputConfig(AnalogMeasurementRange.FourToTwentyMilliamps, SampleAverageAmount.Four) },
+                { 3, new AnalogInputConfig(AnalogMeasurementRange.FourToTwentyMilliamps, SampleAverageAmount.Four) },
+                { 4, new AnalogInputConfig(AnalogMeasurementRange.FourToTwentyMilliamps, SampleAverageAmount.Four) }
+            };
+
+        var aoConfig =
+            new Dictionary<ushort, AnalogMeasurementRange>()
+            {
+                { 1,  AnalogMeasurementRange.FourToTwentyMilliamps },
+                { 2,  AnalogMeasurementRange.FourToTwentyMilliamps }
+            };
+
         _connectAction =
             new Func<Task<IDisposableIOBus>>(() =>
                 _connectFactory.ConnectAsync(
                 "192.168.2.50",
                 TimeSpan.FromSeconds(3),
                 TimeSpan.FromSeconds(1),
-                new Dictionary<ushort, AnalogInputConfig>(),
-                new Dictionary<ushort, AnalogMeasurementRange>(),
+                aiconfig,
+                aoConfig,
                 ct: _ctSrc.Token));
 
         _connectionLoop = StartReadLoop(_ctSrc.Token);
@@ -172,7 +189,7 @@ public class PhoenixProxy : IDisposable
                 }
                 finally
                 {
-                    await Task.Delay(250, ct);
+                    await Task.Delay(10, ct);
                 }
             }
 
