@@ -55,37 +55,6 @@ namespace puck.Services
 
             CancellationTokenSource runStopSrc = new CancellationTokenSource();
 
-            var runStateScanTask = Task.Run(async () =>
-            {
-                //ESPRESSO CONTROL LOGIC SCAN HERE
-                while (!combineCtSrc.IsCancellationRequested)
-                {
-                    try
-                    {
-                        if (_runLock.CurrentCount == 0 && GetRunState() == RunState.Idle)
-                        {
-                            _logger.LogInformation("Cancelling mid-process run");
-
-                            //cancel run process and wait for it to release run lock
-                            runStopSrc.Cancel();
-                            runStopSrc.Dispose();
-                            runStopSrc = new CancellationTokenSource();
-
-                            await _runLock.WaitAsync(combineCtSrc.Token);
-                            _runLock.Release();
-                        }
-                    }
-                    catch (Exception e)
-                    {
-                        _logger.LogError($"Failed in {nameof(StartRunScan)} within {nameof(SystemProxy)}: {e.Message}");
-                    }
-                    finally
-                    {
-                        await Task.Delay(5000, combineCtSrc.Token);
-                    }
-                }
-            });
-
             var scanTask = Task.Run(async () =>
             {
                 while (!combineCtSrc.IsCancellationRequested)
@@ -99,15 +68,20 @@ namespace puck.Services
                             await _runLock.WaitAsync(combineCtSrc.Token);
                             await _systemLock.WaitAsync(combineCtSrc.Token);
 
+                            var allCtSrc =
+                                CancellationTokenSource
+                                .CreateLinkedTokenSource(runStopSrc.Token, combineCtSrc.Token);
+
                             try
                             {
                                 //ESPRESSO CONTROL LOGIC SCAN HERE PASS RUNSTOP TOKEN TO ALL HERE
-
+                                await Task.Delay(TimeSpan.FromSeconds(30), allCtSrc.Token);
                             }
                             finally
                             {
                                 _runLock.Release();
                                 _systemLock.Release();
+                                allCtSrc.Dispose();
                             }
                         }
                     }
@@ -119,6 +93,47 @@ namespace puck.Services
                     {
                         await Task.Delay(5000, combineCtSrc.Token);
                     }
+                }
+            });
+
+
+            var runStateScanTask = Task.Run(async () =>
+            {
+                try
+                {
+                    //ESPRESSO CONTROL LOGIC SCAN HERE
+                    while (!combineCtSrc.IsCancellationRequested)
+                    {
+                        try
+                        {
+                            if (_runLock.CurrentCount == 0 && GetRunState() == RunState.Idle)
+                            {
+                                _logger.LogInformation("Cancelling mid-process run");
+
+                                //cancel run process and wait for it to release run lock
+                                runStopSrc.Cancel();
+                                runStopSrc.Dispose();
+                                runStopSrc = new CancellationTokenSource();
+
+                                await _runLock.WaitAsync(combineCtSrc.Token);
+                                _runLock.Release();
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError($"Failed in {nameof(StartRunScan)} within {nameof(SystemProxy)}: {e.Message}");
+                        }
+                        finally
+                        {
+                            await Task.Delay(5000, combineCtSrc.Token);
+                        }
+                    }
+                }
+                finally
+                {
+                    runStopSrc.Cancel();
+                    await scanTask;
+                    runStopSrc.Dispose();
                 }
             });
 
@@ -186,7 +201,7 @@ namespace puck.Services
 
         public ValveState GetGroupHeadValveState()
         {
-            var state = GetValveState(2);
+            var state = GetValveState(3);
             return state;
         }
 
@@ -240,6 +255,16 @@ namespace puck.Services
             }
         }
 
+        public Task SetRunStatusRun(CancellationToken ct)
+        {
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
+        }
+
+        public Task SetRunStatusIdle(CancellationToken ct)
+        {
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, false, ct), ct);
+        }
+
         public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
         {
             return ExecuteSystemActionAsync(() => _tempProxy.SetSetPointAsync(setpoint, ct), ct);
@@ -257,11 +282,12 @@ namespace puck.Services
 
         public Task SetGroupHeadValveStateOpenAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(3, true, ct), ct);
         }
+
         public Task SetGroupHeadValveStateClosedAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, false, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(3, false, ct), ct);
         }
 
         public Task SetRecirculationValveStateOpenAsync(CancellationToken ct)

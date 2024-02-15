@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.IO.Ports;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using puck.Services;
 using Puck.Services;
 
 namespace Puck.Controllers;
@@ -11,15 +12,12 @@ namespace Puck.Controllers;
 public class SystemController : ControllerBase
 {
     private readonly ILogger<SystemController> _logger;
-    private readonly PhoenixProxy _proxy;
-    private readonly TemperatureControllerProxy _tcProxy;
+    private readonly SystemProxy _proxy;
 
     public SystemController(
         ILogger<SystemController> logger,
-        TemperatureControllerProxy tcProxy,
-        PhoenixProxy proxy)
+        SystemProxy proxy)
     {
-        _tcProxy = tcProxy;
         _logger = logger;
         _proxy = proxy;
     }
@@ -39,54 +37,39 @@ public class SystemController : ControllerBase
     }
 
     [HttpGet]
-    [Route("io-state")]
+    [Route("state")]
     public IActionResult GetIoStateAsync(CancellationToken ct = default)
     {
         var state = new
         {
-            DigitalInputState = _proxy.DigitalInputState,
-            DigitalOutputState = _proxy.DigitalOutputState,
-            AnalogInputState = _proxy.AnalogInputState,
-            AnalogOutputState = _proxy.AnalogOutputState
+            Temperature = _proxy.GetProcessTemperature(),
+            TemperatureSetPoint = _proxy.GetSetPointTemperature(),
+            Pressure = _proxy.GetGroupHeadPressure(),
+            PumpSpeed = _proxy.GetPumpSpeedSetting(),
+            RunState = _proxy.GetRunState(),
+            RecirculationValveState = _proxy.GetRecirculationValveState(),
+            GroupHeadValveState = _proxy.GetGroupHeadValveState(),
+            
         };
 
         return Ok(state);
     }
 
     [HttpPost]
-    [Route("digital-output")]
-    public async Task<IActionResult> PostDigitalOutputAsync(CancellationToken ct = default)
+    [Route("run-status/idle")]
+    public async Task<IActionResult> PostRunStatusIdle(CancellationToken ct = default)
     {
-        bool current = _proxy.DigitalOutputState[1].Value.State;
-        await _proxy.SetDigitalOutputStateAsync(1, !current, ct);
-
-        return Ok("Set digital output");
-    }
-
-    [HttpGet]
-    [Route("get-setpoint")]
-    public IActionResult GetSetPoint(CancellationToken ct = default)
-    {
-        var sp = _tcProxy.GetSetValue();
-        return Ok(new { sp });
-    }
-
-    [HttpGet]
-    [Route("get-process-value")]
-    public IActionResult GetProcessValue(CancellationToken ct = default)
-    {
-        var pv = _tcProxy.GetProcessValue();
-        return Ok(new { pv });
+        await _proxy.SetRunStatusIdle(ct);
+        return Ok("Set to idle");
     }
 
     [HttpPost]
-    [Route("set-setpoint")]
-    public async Task<IActionResult> SetSetPoint(CancellationToken ct = default)
+    [Route("run-status/run")]
+    public async Task<IActionResult> PostRunStatusRun(CancellationToken ct = default)
     {
-        var current = _tcProxy.GetSetValue();
-        var next = current == 100 ? 60 : 100;
-        await _tcProxy.SetSetPointAsync(next, ct);
-        return Ok();
+        await _proxy.SetRunStatusRun(ct);
+        return Ok("Set to run");
     }
+
 
 }
