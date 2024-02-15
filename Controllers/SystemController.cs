@@ -46,9 +46,9 @@ public class SystemController : ControllerBase
             TemperatureSetPoint = _proxy.GetSetPointTemperature(),
             Pressure = _proxy.GetGroupHeadPressure(),
             PumpSpeed = _proxy.GetPumpSpeedSetting(),
-            RunState = _proxy.GetRunState(),
-            RecirculationValveState = _proxy.GetRecirculationValveState(),
-            GroupHeadValveState = _proxy.GetGroupHeadValveState(),
+            RunState = _proxy.GetRunState().ToString(),
+            RecirculationValveState = _proxy.GetRecirculationValveState().ToString(),
+            GroupHeadValveState = _proxy.GetGroupHeadValveState().ToString(),
             
         };
 
