@@ -236,11 +236,13 @@ namespace puck.Services
             return temp;
         }
 
-
-        private async Task ExecuteSystemActionHelperAsync(
+        private async Task ExecuteSystemActionAsync(
             Func<Task> action,
             CancellationToken ct)
         {
+            if (_runLock.CurrentCount == 0)
+                throw new Exception("Cannot execute operation while run is in process");
+
             await _systemLock.WaitAsync(ct);
 
             try
@@ -253,16 +255,6 @@ namespace puck.Services
             }
         }
 
-        private async Task ExecuteSystemActionAsync(
-            Func<Task> action,
-            CancellationToken ct)
-        {
-            if (_runLock.CurrentCount == 0)
-                throw new Exception("Cannot execute operation while run is in process");
-
-            await ExecuteSystemActionHelperAsync(action, ct);
-        }
-
         public Task SetRunStatusRun(CancellationToken ct)
         {
             return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
@@ -270,7 +262,7 @@ namespace puck.Services
 
         public Task SetRunStatusIdle(CancellationToken ct)
         {
-            return ExecuteSystemActionHelperAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, false, ct), ct);
+            return _ioProxy.SetDigitalOutputStateAsync(2, false, ct);
         }
 
         public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
