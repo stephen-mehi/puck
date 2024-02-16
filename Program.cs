@@ -18,13 +18,19 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-builder.Services.AddLogging(builder =>
+builder
+.Services
+.AddLogging(builder =>
 {
     builder
     .ClearProviders()
     .AddDebug()
-    .AddConsole();
-    
+    .AddSimpleConsole(o =>
+    {
+        o.IncludeScopes = true;
+        o.TimestampFormat = "HH:mm:ss ";
+    });
+
 });
 
 var app = builder.Build();
