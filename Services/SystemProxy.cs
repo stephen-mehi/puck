@@ -54,8 +54,6 @@ namespace puck.Services
 
             var combineCtSrc = CancellationTokenSource.CreateLinkedTokenSource(ct, _ctSrc.Token);
 
-            await _runScanLock.WaitAsync(combineCtSrc.Token);
-
             CancellationTokenSource runStopSrc = new CancellationTokenSource();
 
             var scanTask = Task.Run(async () =>
