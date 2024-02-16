@@ -19,7 +19,7 @@ public class PidControlLoop : IDisposable
     public async Task StartControlLoopAsync(
         double setpoint,
         Func<double> getProcessValue,
-        Action<double> actuate,
+        Func<double, CancellationToken, Task> actuate,
         double proportionalGain,
         double integralGain,
         double derivativeGain,
@@ -50,13 +50,13 @@ public class PidControlLoop : IDisposable
                     var currentTime = DateTime.UtcNow;
                     var previousTime = currentTime - TimeSpan.FromMilliseconds(100);
 
-                    while (!_ctSrc.IsCancellationRequested)
+                    while (!combinedCt.IsCancellationRequested)
                     {
                         var processVar = getProcessValue();
                         var output = pid.PID_iterate(setpoint, processVar, currentTime - previousTime);
-                        actuate(output);
+                        await actuate(output, combinedCt.Token);
 
-                        await Task.Delay(100, _ctSrc.Token);
+                        await Task.Delay(100, combinedCt.Token);
                         previousTime = currentTime;
                         currentTime = DateTime.UtcNow;
                     }
