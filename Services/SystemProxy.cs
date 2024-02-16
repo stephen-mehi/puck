@@ -271,7 +271,7 @@ namespace puck.Services
             Func<Task> action,
             CancellationToken ct)
         {
-            if (_runLock.CurrentCount == 0)
+            if (!_runLock.Wait(0))
                 throw new Exception("Cannot execute operation while run is in process");
 
             await _systemLock.WaitAsync(ct);
