@@ -76,15 +76,18 @@ namespace puck.Services
                             try
                             {
                                 //ESPRESSO CONTROL LOGIC SCAN HERE PASS RUNSTOP TOKEN TO ALL HERE
-                                await Task.Delay(TimeSpan.FromSeconds(30), allCtSrc.Token);
 
+                                _logger.LogInformation("Closing grouphead valve");
                                 //CLOSE GROUPHEAD VALVE
                                 await SetGroupHeadValveStateClosedAsync(allCtSrc.Token);
+                                _logger.LogInformation("Opening recirc valve");
                                 //OPEN RECIRC
                                 await SetRecirculationValveStateOpenAsync(ct);
                                 //SET FIXED PUMP SPEED
+
+                                _logger.LogInformation("Setting temp");
                                 //SET HEATER ENABLED AND WAIT FOR TEMP
-                                await _tempProxy.ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromMinutes(1), allCtSrc.Token);
+                                await _tempProxy.ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromSeconds(30), allCtSrc.Token);
 
                                 //TARE SCALE
                                 //OPEN GROUPHEAD VALVE
