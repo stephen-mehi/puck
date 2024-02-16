@@ -49,7 +49,7 @@ public class SystemController : ControllerBase
             RunState = _proxy.GetRunState().ToString(),
             RecirculationValveState = _proxy.GetRecirculationValveState().ToString(),
             GroupHeadValveState = _proxy.GetGroupHeadValveState().ToString(),
-            
+
         };
 
         return Ok(state);
@@ -59,6 +59,7 @@ public class SystemController : ControllerBase
     [Route("run-status/idle")]
     public async Task<IActionResult> PostRunStatusIdle(CancellationToken ct = default)
     {
+        _logger.LogInformation("Posted idle");
         await _proxy.SetRunStatusIdle(ct);
         return Ok("Set to idle");
     }
@@ -67,6 +68,7 @@ public class SystemController : ControllerBase
     [Route("run-status/run")]
     public async Task<IActionResult> PostRunStatusRun(CancellationToken ct = default)
     {
+        _logger.LogInformation("Posted run");
         await _proxy.SetRunStatusRun(ct);
         return Ok("Set to run");
     }
