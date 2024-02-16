@@ -142,6 +142,10 @@ namespace puck.Services
                                 await _runLock.WaitAsync(combineCtSrc.Token);
                                 _runLock.Release();
                             }
+                            else
+                            {
+                                _runLock.Release();
+                            }
                         }
                         catch (Exception e)
                         {
