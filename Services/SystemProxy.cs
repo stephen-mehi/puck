@@ -26,7 +26,7 @@ namespace puck.Services
         private readonly CancellationTokenSource _ctSrc;
         private readonly SemaphoreSlim _systemLock;
         private readonly SemaphoreSlim _runLock;
-        private int _started = 0;
+        private readonly SemaphoreSlim _runScanLock;
         private Task? _scanTask;
 
         private bool _isDisposed;
@@ -41,17 +41,20 @@ namespace puck.Services
             _tempProxy = tempProxy;
             _systemLock = new SemaphoreSlim(1, 1);
             _runLock = new SemaphoreSlim(1, 1);
+            _runScanLock = new SemaphoreSlim(1, 1);
             _ctSrc = new CancellationTokenSource();
         }
 
-        public Task StartRunScan(CancellationToken ct)
+        public async Task StartRunScan(CancellationToken ct)
         {
             _logger.LogInformation("Started run scan");
 
-            if (Interlocked.Exchange(ref _started, 1) == 1)
+            if (!await _runScanLock.WaitAsync(0))
                 throw new Exception("Cannot start run scan if already started");
 
             var combineCtSrc = CancellationTokenSource.CreateLinkedTokenSource(ct, _ctSrc.Token);
+
+            await _runScanLock.WaitAsync(combineCtSrc.Token);
 
             CancellationTokenSource runStopSrc = new CancellationTokenSource();
 
@@ -107,7 +110,7 @@ namespace puck.Services
                     {
                         try
                         {
-                            if (_runLock.CurrentCount == 0 && GetRunState() == RunState.Idle)
+                            if (!await _runLock.WaitAsync(0) && GetRunState() == RunState.Idle)
                             {
                                 _logger.LogInformation("Cancelling mid-process run");
 
@@ -139,7 +142,7 @@ namespace puck.Services
             });
 
             _scanTask = Task.WhenAll(scanTask, runStateScanTask);
-            return _scanTask;
+            await _scanTask;
         }
 
         private AnalogIoState? GetAnalogInputState(ushort index)
@@ -329,6 +332,11 @@ namespace puck.Services
                 _scanTask?.Wait(5000);
                 _ioProxy?.Dispose();
                 _tempProxy?.Dispose();
+                _ctSrc?.Dispose();
+
+                _runLock?.Dispose();
+                _runScanLock?.Dispose();
+                _systemLock?.Dispose();
             }
 
             _isDisposed = true;

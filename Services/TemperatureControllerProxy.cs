@@ -125,6 +125,7 @@ public class TemperatureControllerProxy
             _ctSrc.Cancel();
             _task.Wait(3000);
             _proxy?.Dispose();
+            _lock.Dispose();
         }
 
         _isDisposed = true;

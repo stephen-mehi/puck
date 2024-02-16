@@ -231,6 +231,7 @@ public class PhoenixProxy : IDisposable
             _ctSrc.Cancel();
             _connectionLoop.Wait(3000);
             _phoenix?.Dispose();
+            _deviceLock?.Dispose();
         }
 
         _isDisposed = true;
