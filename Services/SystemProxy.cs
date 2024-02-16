@@ -60,6 +60,7 @@ namespace puck.Services
 
             var scanTask = Task.Run(async () =>
             {
+                _logger.LogInformation("Entered run scan task");
                 while (!combineCtSrc.IsCancellationRequested)
                 {
                     try
@@ -95,7 +96,7 @@ namespace puck.Services
                     }
                     finally
                     {
-                        await Task.Delay(5000, combineCtSrc.Token);
+                        await Task.Delay(250, combineCtSrc.Token);
                     }
                 }
             });
@@ -129,7 +130,7 @@ namespace puck.Services
                         }
                         finally
                         {
-                            await Task.Delay(5000, combineCtSrc.Token);
+                            await Task.Delay(250, combineCtSrc.Token);
                         }
                     }
                 }
