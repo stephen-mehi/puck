@@ -109,6 +109,48 @@ public class TemperatureControllerProxy
         }
     }
 
+    public async Task ApplySetPointSynchronouslyAsync(
+            int tempSetPoint,
+            double tolerance,
+            TimeSpan timeout,
+            CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        var startTime = DateTime.UtcNow;
+
+        try
+        {
+            await _proxy.SetSetValueAsync(tempSetPoint, ct);
+            await _proxy.EnableControlLoopAsync(ct);
+
+            while (true)
+            {
+                if (DateTime.UtcNow - startTime > timeout)
+                    throw new TimeoutException($"Failed to get to specified temperature: {tempSetPoint} after specified seconds: {timeout.TotalSeconds}");
+                    
+                if(!_processValue.HasValue)
+                {
+                    await Task.Delay(100, ct);
+                    continue;
+                }
+
+                if (Math.Abs(tempSetPoint - _processValue.Value) < tolerance)
+                    break;
+
+                await Task.Delay(100, ct);
+            }
+        }
+        catch (Exception)
+        {
+            await _proxy.DisableControlLoopAsync(ct);
+            throw;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public double? GetSetValue() => _setValue;
     public double? GetProcessValue() => _processValue;
 

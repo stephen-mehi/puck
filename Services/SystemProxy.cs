@@ -69,7 +69,6 @@ namespace puck.Services
 
                             await _runLock.WaitAsync(combineCtSrc.Token);
                             await _systemLock.WaitAsync(combineCtSrc.Token);
-
                             var allCtSrc =
                                 CancellationTokenSource
                                 .CreateLinkedTokenSource(runStopSrc.Token, combineCtSrc.Token);
@@ -78,6 +77,25 @@ namespace puck.Services
                             {
                                 //ESPRESSO CONTROL LOGIC SCAN HERE PASS RUNSTOP TOKEN TO ALL HERE
                                 await Task.Delay(TimeSpan.FromSeconds(30), allCtSrc.Token);
+
+                                //CLOSE GROUPHEAD VALVE
+                                await SetGroupHeadValveStateClosedAsync(allCtSrc.Token);
+                                //OPEN RECIRC
+                                await SetRecirculationValveStateOpenAsync(ct);
+                                //SET FIXED PUMP SPEED
+                                //SET HEATER ENABLED AND WAIT FOR TEMP
+                                await _tempProxy.ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromMinutes(1), allCtSrc.Token);
+
+                                //TARE SCALE
+                                //OPEN GROUPHEAD VALVE
+                                //CLOSE RECIRC 
+                                //START PID PRESSURE LOOP
+                                //RUN UNTIL SCALE REACHES WEIGHT
+                                //STOP PUMP
+                                //DISABLE HEATER
+                                //CLOSE GROUPHEAD VALVE
+                                //OPEN RECIRC
+                                //
                             }
                             finally
                             {
@@ -152,6 +170,14 @@ namespace puck.Services
             return val;
         }
 
+        private AnalogIoState? GetAnalogOutputState(ushort index)
+        {
+            if (!_ioProxy.AnalogOutputState.TryGetValue(index, out var val))
+                throw new Exception($"Error in {nameof(GetAnalogInputState)} within {nameof(SystemProxy)}. No analog output found with index {index}");
+
+            return val;
+        }
+
         private ValveState GetValveState(ushort index)
         {
             if (!_ioProxy.DigitalOutputState.TryGetValue(index, out var val))
@@ -204,14 +230,14 @@ namespace puck.Services
 
         public ValveState GetGroupHeadValveState()
         {
-            var state = GetValveState(3);
+            var state = GetValveState(2);
             return state;
         }
 
 
         public double? GetPumpSpeedSetting()
         {
-            var pumpSpeed = GetAnalogInputState(2);
+            var pumpSpeed = GetAnalogOutputState(1);
 
             return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
         }
@@ -259,12 +285,12 @@ namespace puck.Services
 
         public Task SetRunStatusRun(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(4, true, ct), ct);
         }
 
         public Task SetRunStatusIdle(CancellationToken ct)
         {
-            return _ioProxy.SetDigitalOutputStateAsync(2, false, ct);
+            return _ioProxy.SetDigitalOutputStateAsync(4, false, ct);
         }
 
         public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
@@ -284,12 +310,12 @@ namespace puck.Services
 
         public Task SetGroupHeadValveStateOpenAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(3, true, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
         }
 
         public Task SetGroupHeadValveStateClosedAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(3, false, ct), ct);
+            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, false, ct), ct);
         }
 
         public Task SetRecirculationValveStateOpenAsync(CancellationToken ct)
