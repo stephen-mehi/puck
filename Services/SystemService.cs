@@ -26,7 +26,7 @@ public class SystemService : IHostedService, IDisposable
 
         if (_workTask == null)
         {
-            await _proxy.SetAllIdleAsync(ct);
+            //await _proxy.SetAllIdleAsync(ct);
             _workTask = _proxy.StartRunScan(_ctSrc.Token);
         }
 
