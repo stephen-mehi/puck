@@ -20,17 +20,17 @@ public class SystemService : IHostedService, IDisposable
         _ctSrc = new CancellationTokenSource();
     }
 
-    public Task StartAsync(CancellationToken ct)
+    public async Task StartAsync(CancellationToken ct)
     {
         _logger.LogInformation("Background service is starting.");
 
         if (_workTask == null)
         {
-            //await _proxy.SetAllIdleAsync(ct);
+            await _proxy.SetAllIdleAsync(ct);
             _workTask = _proxy.StartRunScan(_ctSrc.Token);
         }
 
-        return Task.CompletedTask;
+        await Task.CompletedTask;
     }
 
     public Task StopAsync(CancellationToken cancellationToken)

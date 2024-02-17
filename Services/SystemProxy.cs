@@ -115,6 +115,7 @@ namespace puck.Services
                             }
                             finally
                             {
+                                await SetAllIdleInternalAsync(allCtSrc.Token);
                                 _runLock.Release();
                                 _systemLock.Release();
                                 allCtSrc.Dispose();
@@ -388,17 +389,18 @@ namespace puck.Services
             return ExecuteSystemActionAsync(() => SetRecirculationValveStateClosedInternalAsync(ct), ct);
         }
 
+        private async Task SetAllIdleInternalAsync(CancellationToken ct)
+        {
+            await StopPumpInternalAsync(ct);
+            await SetRecirculationValveStateOpenInternalAsync(ct);
+            await Task.Delay(250, ct);
+            await SetGroupHeadValveStateClosedInternalAsync(ct);
+            await SetRecirculationValveStateClosedInternalAsync(ct);
+        }
+
         public Task SetAllIdleAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(async () =>
-            {
-                await StopPumpAsync(ct);
-                await SetRecirculationValveStateOpenAsync(ct);
-                await Task.Delay(250, ct);
-                await SetGroupHeadValveStateClosedAsync(ct);
-                await SetRecirculationValveStateClosedAsync(ct);
-
-            }, ct);
+            return ExecuteSystemActionAsync(() => SetAllIdleInternalAsync(ct), ct);
         }
 
 
