@@ -115,6 +115,7 @@ namespace puck.Services
                             }
                             finally
                             {
+                                await SetRunStatusIdleAsync(allCtSrc.Token);
                                 await SetAllIdleInternalAsync(allCtSrc.Token);
                                 _runLock.Release();
                                 _systemLock.Release();
@@ -125,7 +126,7 @@ namespace puck.Services
                     }
                     catch (Exception e)
                     {
-                        _logger.LogError($"Failed in {nameof(StartRunScan)} within {nameof(SystemProxy)}: {e.Message}");
+                        _logger.LogError(e, $"Failed in {nameof(StartRunScan)} within {nameof(SystemProxy)}: {e.Message}");
                     }
                     finally
                     {
@@ -163,7 +164,7 @@ namespace puck.Services
                         }
                         catch (Exception e)
                         {
-                            _logger.LogError($"Failed in {nameof(StartRunScan)} within {nameof(SystemProxy)}: {e.Message}");
+                            _logger.LogError(e, $"Failed in {nameof(StartRunScan)} within {nameof(SystemProxy)}: {e.Message}");
                         }
                         finally
                         {
