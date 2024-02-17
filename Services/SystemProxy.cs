@@ -31,6 +31,19 @@ namespace puck.Services
 
         private bool _isDisposed;
 
+
+        #region IO_MAPPING
+
+        private readonly ushort _recircValve_IO = 1;
+        private readonly ushort _groupheadValve_IO = 2;
+        private readonly ushort _runStatusOutput_IO = 4;
+        private readonly ushort _runStatusInput_IO = 1;
+        private readonly ushort _pumpSpeed_IO = 1;
+        private readonly ushort _pressure_IO = 1;
+
+
+        #endregion
+
         public SystemProxy(
             ILogger<SystemService> logger,
             PhoenixProxy ioProxy,
@@ -79,10 +92,10 @@ namespace puck.Services
 
                                 _logger.LogInformation("Closing grouphead valve");
                                 //CLOSE GROUPHEAD VALVE
-                                await SetGroupHeadValveStateClosedAsync(allCtSrc.Token);
+                                await SetGroupHeadValveStateClosedInternalAsync(allCtSrc.Token);
                                 _logger.LogInformation("Opening recirc valve");
                                 //OPEN RECIRC
-                                await SetRecirculationValveStateOpenAsync(ct);
+                                await SetRecirculationValveStateOpenInternalAsync(allCtSrc.Token);
                                 //SET FIXED PUMP SPEED
 
                                 _logger.LogInformation("Setting temp");
@@ -217,7 +230,7 @@ namespace puck.Services
 
         public RunState GetRunState()
         {
-            if (!_ioProxy.DigitalInputState.TryGetValue(1, out var val))
+            if (!_ioProxy.DigitalInputState.TryGetValue(_runStatusInput_IO, out var val))
                 throw new Exception($"Error in {nameof(GetRunState)} within {nameof(SystemProxy)}. No digital input found with index 1");
 
             if (!val.HasValue)
@@ -231,27 +244,27 @@ namespace puck.Services
 
         public ValveState GetRecirculationValveState()
         {
-            var state = GetValveState(1);
+            var state = GetValveState(_recircValve_IO);
             return state;
         }
 
         public ValveState GetGroupHeadValveState()
         {
-            var state = GetValveState(2);
+            var state = GetValveState(_groupheadValve_IO);
             return state;
         }
 
 
         public double? GetPumpSpeedSetting()
         {
-            var pumpSpeed = GetAnalogOutputState(1);
+            var pumpSpeed = GetAnalogOutputState(_pumpSpeed_IO);
 
             return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
         }
 
         public double? GetGroupHeadPressure()
         {
-            var pumpSpeed = GetAnalogInputState(1);
+            var pumpSpeed = GetAnalogInputState(_pressure_IO);
 
             return pumpSpeed.HasValue ? pumpSpeed.Value.State : null;
         }
@@ -290,56 +303,95 @@ namespace puck.Services
             }
         }
 
-        public Task SetRunStatusRun(CancellationToken ct)
+        private Task SetRunStatusRunInternalAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(4, true, ct), ct);
+            return _ioProxy.SetDigitalOutputStateAsync(_runStatusOutput_IO, true, ct);
         }
 
-        public Task SetRunStatusIdle(CancellationToken ct)
+        public Task SetRunStatusRunAsync(CancellationToken ct)
         {
-            return _ioProxy.SetDigitalOutputStateAsync(4, false, ct);
+            return ExecuteSystemActionAsync(() => SetRunStatusRunInternalAsync(ct), ct);
+        }
+
+        public Task SetRunStatusIdleAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_runStatusOutput_IO, false, ct);
+        }
+
+        private Task SetTemperatureSetpointInternalAsync(int setpoint, CancellationToken ct)
+        {
+            return _tempProxy.SetSetPointAsync(setpoint, ct);
         }
 
         public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _tempProxy.SetSetPointAsync(setpoint, ct), ct);
+            return ExecuteSystemActionAsync(() => SetTemperatureSetpointAsync(setpoint, ct), ct);
+        }
+
+        private Task ApplyPumpSpeedInternalAsync(double speed, CancellationToken ct)
+        {
+            return _ioProxy.SetAnalogOutputStateAsync(_pumpSpeed_IO, speed, ct);
         }
 
         public Task ApplyPumpSpeedAsync(double speed, CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(1, speed, ct), ct);
+            return ExecuteSystemActionAsync(() => ApplyPumpSpeedInternalAsync(speed, ct), ct);
+        }
+
+        private Task StopPumpInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetAnalogOutputStateAsync(_pumpSpeed_IO, 0, ct);
         }
 
         public Task StopPumpAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetAnalogOutputStateAsync(1, 0, ct), ct);
+            return ExecuteSystemActionAsync(() => StopPumpInternalAsync(ct), ct);
+        }
+
+        private Task SetGroupHeadValveStateOpenInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_groupheadValve_IO, true, ct);
         }
 
         public Task SetGroupHeadValveStateOpenAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, true, ct), ct);
+            return ExecuteSystemActionAsync(() => SetGroupHeadValveStateOpenInternalAsync(ct), ct);
+        }
+
+        private Task SetGroupHeadValveStateClosedInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_groupheadValve_IO, false, ct);
         }
 
         public Task SetGroupHeadValveStateClosedAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(2, false, ct), ct);
+            return ExecuteSystemActionAsync(() => SetGroupHeadValveStateClosedInternalAsync(ct), ct);
+        }
+
+        private Task SetRecirculationValveStateOpenInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_recircValve_IO, true, ct);
         }
 
         public Task SetRecirculationValveStateOpenAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, true, ct), ct);
+            return ExecuteSystemActionAsync(() => SetRecirculationValveStateOpenInternalAsync(ct), ct);
+        }
+
+        private Task SetRecirculationValveStateClosedInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_recircValve_IO, false, ct);
         }
 
         public Task SetRecirculationValveStateClosedAsync(CancellationToken ct)
         {
-            return ExecuteSystemActionAsync(() => _ioProxy.SetDigitalOutputStateAsync(1, false, ct), ct);
+            return ExecuteSystemActionAsync(() => SetRecirculationValveStateClosedInternalAsync(ct), ct);
         }
 
         public Task SetAllIdleAsync(CancellationToken ct)
         {
             return ExecuteSystemActionAsync(async () =>
             {
-
                 await StopPumpAsync(ct);
                 await SetRecirculationValveStateOpenAsync(ct);
                 await Task.Delay(250, ct);

@@ -60,7 +60,7 @@ public class SystemController : ControllerBase
     public async Task<IActionResult> PostRunStatusIdle(CancellationToken ct = default)
     {
         _logger.LogInformation("Posted idle");
-        await _proxy.SetRunStatusIdle(ct);
+        await _proxy.SetRunStatusIdleAsync(ct);
         return Ok("Set to idle");
     }
 
@@ -69,7 +69,7 @@ public class SystemController : ControllerBase
     public async Task<IActionResult> PostRunStatusRun(CancellationToken ct = default)
     {
         _logger.LogInformation("Posted run");
-        await _proxy.SetRunStatusRun(ct);
+        await _proxy.SetRunStatusRunAsync(ct);
         return Ok("Set to run");
     }
 
