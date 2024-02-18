@@ -51,6 +51,24 @@ public class SystemController : ControllerBase
     }
 
     [HttpPost]
+    [Route("pump/run")]
+    public async Task<IActionResult> PostRunPump(CancellationToken ct = default)
+    {
+        _logger.LogInformation("Posted run pump");
+        await _proxy.ApplyPumpSpeedAsync(8, ct);
+        return Ok("pump running");
+    }
+
+    [HttpPost]
+    [Route("pump/stop")]
+    public async Task<IActionResult> PostStopPump(CancellationToken ct = default)
+    {
+        _logger.LogInformation("Posted stop pump");
+        await _proxy.StopPumpAsync(ct);
+        return Ok("pump stopped");
+    }
+
+    [HttpPost]
     [Route("run-status/run")]
     public async Task<IActionResult> PostRunStatusRun(CancellationToken ct = default)
     {
