@@ -127,7 +127,7 @@ public class PhoenixProxy : IDisposable
 
                 using (var testClient = new TcpClient())
                 using (var ctSrc = new CancellationTokenSource())
-                using(var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
+                using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
                 {
                     while (!connected)
                     {
@@ -137,7 +137,7 @@ public class PhoenixProxy : IDisposable
                         {
                             _logger.LogInformation("Attempting to test phoenix connection using tcp client..");
                             await testClient.ConnectAsync(host, port, linked.Token);
-                            _logger.LogInformation("Attempting to connect to phoenix..");
+                            _logger.LogInformation("Connected using test client now closing connection");
                             connected = true;
                             testClient.Close();
                         }
@@ -147,11 +147,13 @@ public class PhoenixProxy : IDisposable
                         }
                         finally
                         {
-                          await Task.Delay(3000, linked.Token);
+                            await Task.Delay(3000, linked.Token);
                         }
                     }
                 }
 
+                _logger.LogInformation("Attempting to connect to phoenix using modbus client");
+                
                 return
                     await _connectFactory.ConnectAsync(
                         "192.168.2.50",
