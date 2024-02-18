@@ -23,20 +23,6 @@ public class SystemController : ControllerBase
     }
 
     [HttpGet]
-    [Route("readiness")]
-    public IActionResult GetReadyState()
-    {
-        return Ok();
-    }
-
-    [HttpGet]
-    [Route("health")]
-    public IActionResult GetHealthState()
-    {
-        return Ok();
-    }
-
-    [HttpGet]
     [Route("state")]
     public IActionResult GetIoStateAsync(CancellationToken ct = default)
     {
