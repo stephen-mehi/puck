@@ -39,6 +39,16 @@ public class SystemService : IHostedService, IDisposable
 
         _ctSrc.Cancel();
 
+        _logger.LogInformation("Setting system idle");
+
+        _ctSrc.Cancel();
+        _workTask?.Wait(5000);
+        _proxy.SetAllIdleAsync(CancellationToken.None).Wait(5000);
+
+        _logger.LogInformation("Disposing system proxy");
+        _proxy.Dispose();
+        _ctSrc.Dispose();
+
         return Task.CompletedTask;
     }
 
