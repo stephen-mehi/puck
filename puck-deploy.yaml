@@ -20,19 +20,19 @@ spec:
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 15
-          periodSeconds: 10
+        #livenessProbe:
+          #httpGet:
+            #path: /health
+            #port: 8080
+          #initialDelaySeconds: 15
+          #periodSeconds: 10
         # Define readiness probe
-        readinessProbe:
-          httpGet:
-            path: /readiness
-            port: 8080
-          initialDelaySeconds: 20
-          periodSeconds: 10
+        #readinessProbe:
+          #httpGet:
+            #path: /readiness
+            #port: 8080
+          #initialDelaySeconds: 20
+          #periodSeconds: 10
         securityContext:
             privileged: true   # Use cautiously
         volumeMounts:
