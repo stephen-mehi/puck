@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Reactive;
 
 namespace Puck.Services;
@@ -117,14 +118,49 @@ public class PhoenixProxy : IDisposable
             };
 
         _connectAction =
-            new Func<Task<IDisposableIOBus>>(() =>
-                _connectFactory.ConnectAsync(
-                "192.168.2.50",
-                TimeSpan.FromSeconds(3),
-                TimeSpan.FromSeconds(1),
-                aiconfig,
-                aoConfig,
-                ct: _ctSrc.Token));
+            new Func<Task<IDisposableIOBus>>(async () =>
+            {
+                string host = "192.168.2.50";
+                int port = 502;
+
+                bool connected = false;
+
+                using (var testClient = new TcpClient())
+                using (var ctSrc = new CancellationTokenSource())
+                using(var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
+                {
+                    while (!connected)
+                    {
+                        ctSrc.CancelAfter(TimeSpan.FromSeconds(3));
+
+                        try
+                        {
+                            _logger.LogInformation("Attempting to test phoenix connection using tcp client..");
+                            await testClient.ConnectAsync(host, port, linked.Token);
+                            _logger.LogInformation("Attempting to connect to phoenix..");
+                            connected = true;
+                            testClient.Close();
+                        }
+                        catch (Exception e)
+                        {
+                            _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in ctor: {e.Message}");
+                        }
+                        finally
+                        {
+                          await Task.Delay(3000, linked.Token);
+                        }
+                    }
+                }
+
+                return
+                    await _connectFactory.ConnectAsync(
+                        "192.168.2.50",
+                        TimeSpan.FromSeconds(3),
+                        TimeSpan.FromSeconds(1),
+                        aiconfig,
+                        aoConfig,
+                        ct: _ctSrc.Token);
+            });
 
         _connectionLoop = StartReadLoop(_ctSrc.Token);
     }
@@ -155,7 +191,9 @@ public class PhoenixProxy : IDisposable
                         try
                         {
                             _phoenix?.Dispose();
+                            _logger.LogInformation("Attempting to connect to phoenix..");
                             _phoenix = await _connectAction();
+                            _logger.LogInformation("Successfully connected to phoenix");
                         }
                         finally
                         {

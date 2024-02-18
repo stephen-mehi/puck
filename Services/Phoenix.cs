@@ -2190,6 +2190,7 @@ public class PhoenixIOBusConnectionFactory : ITcpIOBusConnectionFactory
         CancellationToken ct = default)
     {
         var factory = new ModbusFactory();
+        var test =  new TcpClient(ipAddress, port);
         var adapter = new TcpClientAdapter(new TcpClient(ipAddress, port));
         IModbusMaster master = factory.CreateIpMaster(adapter);
 

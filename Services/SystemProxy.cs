@@ -342,7 +342,7 @@ namespace puck.Services
 
         private Task StopPumpInternalAsync(CancellationToken ct)
         {
-            return _ioProxy.SetAnalogOutputStateAsync(_pumpSpeed_IO, 0, ct);
+            return _ioProxy.SetAnalogOutputStateAsync(_pumpSpeed_IO, 4, ct);
         }
 
         public Task StopPumpAsync(CancellationToken ct)
