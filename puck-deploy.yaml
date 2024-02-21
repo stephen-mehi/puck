@@ -83,3 +83,33 @@ data:
         pipeline_stages:
           - match:
               selector: '{job="kubelet"}'
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      containers:
+        - name: promtail
+          image: grafana/promtail:2.9.4
+          args:
+            - -config.file=-
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+      volumes:
+        - name: config
+          configMap:
+            name: promtail-config
+    tolerations:
+    - key: node-role.kubernetes.io/master
+      effect: NoSchedule
