@@ -39,9 +39,27 @@ public class SystemService : IHostedService, IDisposable
         _logger.LogInformation("CANCELLING SYSTEM WORK");
         _ctSrc.Cancel();
         _logger.LogInformation("WAITING FOR SCAN TASK TO STOP");
-        _workTask?.Wait(3000);
+
+        try
+        {
+            _workTask?.Wait(3000);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "ERROR OCCURRED WHILE WAITING FOR WORK TASK TO COMPLETE");
+        }
+
         _logger.LogInformation("SETTING SYSTEM IDLE");
-        _proxy.SetAllIdleAsync(CancellationToken.None).Wait(1000);
+
+        try
+        {
+            _proxy.SetAllIdleAsync(CancellationToken.None).Wait(1000);
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "ERROR OCCURRED WHILE SETTING SYSTEM IDLE");
+        }
+        
         _logger.LogInformation("DISPOSING SYSTEM PROXY");
         _proxy.Dispose();
         _ctSrc.Dispose();
