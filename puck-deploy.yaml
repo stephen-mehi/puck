@@ -110,6 +110,3 @@ spec:
         - name: config
           configMap:
             name: promtail-config
-    tolerations:
-    - key: node-role.kubernetes.io/master
-      effect: NoSchedule
