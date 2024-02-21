@@ -43,8 +43,8 @@ app
     {
         app
             .Services
-            .GetRequiredService<ILogger>()
-            .LogInformation("APP SHUTTING DOWN, DISPOSING SYSTEM PROXY*********");
+            .GetRequiredService<ILogger<StartupBase>>()
+            .LogInformation("***************APP SHUTTING DOWN, DISPOSING SYSTEM PROXY**********");
 
         app
             .Services
