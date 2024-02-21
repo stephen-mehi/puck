@@ -35,19 +35,21 @@ public class SystemService : IHostedService, IDisposable
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Background service is stopping.");
+        _logger.LogInformation("BACKGROUND SERVICE IS STOPPING");
 
         _ctSrc.Cancel();
 
-        _logger.LogInformation("Setting system idle");
+        _logger.LogInformation("SETTING SYSTEM IDLE");
 
         _ctSrc.Cancel();
-        _workTask?.Wait(5000);
-        _proxy.SetAllIdleAsync(CancellationToken.None).Wait(5000);
+        _workTask?.Wait(1000);
+        _proxy.SetAllIdleAsync(CancellationToken.None).Wait(1000);
 
-        _logger.LogInformation("Disposing system proxy");
+        _logger.LogInformation("DISPOSING SYSTEM PROXY");
         _proxy.Dispose();
         _ctSrc.Dispose();
+
+        _logger.LogInformation("DONE STOPPING SYSTEM PROXY SERVICE");
 
         return Task.CompletedTask;
     }

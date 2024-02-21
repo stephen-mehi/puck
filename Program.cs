@@ -35,23 +35,6 @@ builder
 
 var app = builder.Build();
 
-
-app
-.Lifetime
-.ApplicationStopping
-.Register(() =>
-    {
-        app
-            .Services
-            .GetRequiredService<ILogger<StartupBase>>()
-            .LogInformation("***************APP SHUTTING DOWN, DISPOSING SYSTEM PROXY**********");
-
-        app
-            .Services
-            .GetRequiredService<SystemProxy>()
-            .Dispose();
-    });
-
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
