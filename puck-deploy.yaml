@@ -102,7 +102,7 @@ spec:
         - name: promtail
           image: grafana/promtail:2.9.4
           args:
-            - -config.file=-
+            - -config.file=/etc/promtail/promtail-config.yaml
           volumeMounts:
             - name: config
               mountPath: /etc/promtail
