@@ -37,7 +37,15 @@ public class SystemService : IHostedService, IDisposable
     {
         _logger.LogInformation("BACKGROUND SERVICE IS STOPPING");
         _logger.LogInformation("CANCELLING SYSTEM WORK");
-        _ctSrc.Cancel();
+        try
+        {
+            _ctSrc.Cancel();
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "ERROR OCCURRED WHILE CANCELLING SYSTEM WORK");
+        }
+
         _logger.LogInformation("WAITING FOR SCAN TASK TO STOP");
 
         try
@@ -59,10 +67,27 @@ public class SystemService : IHostedService, IDisposable
         {
             _logger.LogError(e, "ERROR OCCURRED WHILE SETTING SYSTEM IDLE");
         }
-        
+
         _logger.LogInformation("DISPOSING SYSTEM PROXY");
-        _proxy.Dispose();
-        _ctSrc.Dispose();
+
+        try
+        {
+            _proxy?.Dispose();
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "ERROR OCCURRED WHILE DISPOSING SYSTEM PROXY");
+        }
+
+        try
+        {
+            _ctSrc?.Dispose();
+        }
+        catch (Exception e)
+        {
+            _logger.LogError(e, "ERROR OCCURRED WHILE DISPOSING CANCELLATION TOKEN");
+        }
+
         _logger.LogInformation("DONE STOPPING SYSTEM PROXY SERVICE");
 
         return Task.CompletedTask;

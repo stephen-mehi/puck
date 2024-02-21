@@ -415,15 +415,14 @@ namespace puck.Services
 
             if (disposing)
             {
-                _ctSrc.Cancel();
-                _scanTask?.Wait(5000);
-                _ioProxy?.Dispose();
-                _tempProxy?.Dispose();
-                _ctSrc?.Dispose();
-
-                _runLock?.Dispose();
-                _runScanLock?.Dispose();
-                _systemLock?.Dispose();
+                try { _ctSrc?.Cancel(); } catch (Exception) { }
+                try { _scanTask?.Wait(5000); } catch (Exception) { }
+                try { _ioProxy?.Dispose(); } catch (Exception) { }
+                try { _tempProxy?.Dispose(); } catch (Exception) { }
+                try { _ctSrc?.Dispose(); } catch (Exception) { }
+                try { _runLock?.Dispose(); } catch (Exception) { }
+                try { _runScanLock?.Dispose(); } catch (Exception) { }
+                try { _systemLock?.Dispose(); } catch (Exception) { }
             }
 
             _isDisposed = true;
