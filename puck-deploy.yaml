@@ -82,7 +82,14 @@ data:
             target_label: container_name
           - action: replace
             source_labels: [__meta_kubernetes_pod_name]
-            target_label: pod_name  
+            target_label: pod_name
+      - job_name: puck-app
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [app]
+            regex: puck
+            action: keep
 ---
 apiVersion: apps/v1
 kind: DaemonSet
