@@ -110,3 +110,6 @@ spec:
         - name: config
           configMap:
             name: promtail-config
+            items:
+              - key: promtail.yaml
+                path: promtail.yaml
