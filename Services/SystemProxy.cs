@@ -392,6 +392,7 @@ namespace puck.Services
 
         public async Task SetAllIdleInternalAsync(CancellationToken ct)
         {
+            await _tempProxy.DisableControlLoopAsync(ct);
             await StopPumpInternalAsync(ct);
             await SetRecirculationValveStateOpenInternalAsync(ct);
             await Task.Delay(250, ct);

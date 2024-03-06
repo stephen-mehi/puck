@@ -109,6 +109,20 @@ public class TemperatureControllerProxy
         }
     }
 
+    public async Task DisableControlLoopAsync(CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+
+        try
+        {
+            await _proxy.DisableControlLoopAsync(ct);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task ApplySetPointSynchronouslyAsync(
             int tempSetPoint,
             double tolerance,
@@ -127,8 +141,8 @@ public class TemperatureControllerProxy
             {
                 if (DateTime.UtcNow - startTime > timeout)
                     throw new TimeoutException($"Failed to get to specified temperature: {tempSetPoint} after specified seconds: {timeout.TotalSeconds}");
-                    
-                if(!_processValue.HasValue)
+
+                if (!_processValue.HasValue)
                 {
                     await Task.Delay(100, ct);
                     continue;
