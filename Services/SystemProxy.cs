@@ -390,7 +390,7 @@ namespace puck.Services
             return ExecuteSystemActionAsync(() => SetRecirculationValveStateClosedInternalAsync(ct), ct);
         }
 
-        private async Task SetAllIdleInternalAsync(CancellationToken ct)
+        public async Task SetAllIdleInternalAsync(CancellationToken ct)
         {
             await StopPumpInternalAsync(ct);
             await SetRecirculationValveStateOpenInternalAsync(ct);
