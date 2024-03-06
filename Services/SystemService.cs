@@ -26,7 +26,22 @@ public class SystemService : IHostedService, IDisposable
 
         if (_workTask == null)
         {
-            //await _proxy.SetAllIdleAsync(ct);
+            bool setAllIdle = false;
+
+            while (!setAllIdle)
+            {
+                try
+                {
+                    await _proxy.SetAllIdleAsync(ct);
+                    setAllIdle = true;
+                }
+                catch(Exception e)
+                {
+                    _logger.LogError(e, "FAILED TO SET SYSTEM TO IDLE IN STARTED");
+                    await Task.Delay(2000, ct);
+                }
+            }
+
             _workTask = _proxy.StartRunScan(_ctSrc.Token);
         }
 
