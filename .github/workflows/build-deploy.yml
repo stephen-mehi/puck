@@ -69,6 +69,12 @@ jobs:
     steps:
     - name: Kubectl tool installer
       uses: Azure/setup-kubectl@v3
+  
+    - name: Delete old deployment
+      run: kubectl delete deployment puck-app
+
+    - name: Wait For Deployment To Start
+      run: Start-Sleep -Seconds 12
       
     - name: Apply pods
       run: kubectl apply -f puck-deploy.yaml --kubeconfig=$HOME\.kube\config\client.config
