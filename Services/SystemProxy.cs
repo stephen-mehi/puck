@@ -293,16 +293,24 @@ namespace puck.Services
             if (!_runLock.Wait(0))
                 throw new Exception("Cannot execute operation while run is in process");
 
-            await _systemLock.WaitAsync(ct);
-
             try
             {
-                await action();
+                await _systemLock.WaitAsync(ct);
+
+                try
+                {
+                    await action();
+                }
+                finally
+                {
+                    _systemLock.Release();
+                }
             }
             finally
             {
-                _systemLock.Release();
+                _runLock.Release();
             }
+
         }
 
         private Task SetRunStatusRunInternalAsync(CancellationToken ct)
