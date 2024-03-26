@@ -81,7 +81,6 @@ public class FujiPXFDriverProvider
             try
             {
                 port.Dispose();
-                port = null;
             }
             catch (Exception) { }
 
@@ -97,7 +96,6 @@ public class FujiPXFDriverProvider
             try
             {
                 port.Dispose();
-                port = null;
             }
             catch (Exception) { }
 

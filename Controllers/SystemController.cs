@@ -55,7 +55,7 @@ public class SystemController : ControllerBase
     public async Task<IActionResult> PostRunPump(CancellationToken ct = default)
     {
         _logger.LogInformation("Posted run pump");
-        await _proxy.ApplyPumpSpeedAsync(8, ct);
+        await _proxy.ApplyPumpSpeedAsync(5, ct);
         return Ok("pump running");
     }
 
