@@ -367,7 +367,7 @@ public abstract class PhoenixAnalogInputModuleBase : IAnalogInputModule
     protected readonly ushort _dataInStartAddress;
     protected ushort _dataOutStartAddress;
 
-    protected IReadOnlyDictionary<ushort, AnalogInputConfig> _configMap;
+    protected IReadOnlyDictionary<ushort, AnalogInputConfig>? _configMap;
 
     public PhoenixAnalogInputModuleBase(
         IModbusMaster modbusServ,
