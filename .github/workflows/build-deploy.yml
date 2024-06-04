@@ -71,6 +71,7 @@ jobs:
       uses: Azure/setup-kubectl@v3
   
     - name: Delete old deployment
+      continue-on-error: true
       run: kubectl delete deployment puck-app --kubeconfig=$HOME\.kube\config\client.config
 
     - name: Wait For Deployment To Start
