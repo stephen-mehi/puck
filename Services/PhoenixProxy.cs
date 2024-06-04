@@ -132,7 +132,7 @@ public class PhoenixProxy : IDisposable
                     var timeout = TimeSpan.FromSeconds(3);
                     while (!connected)
                     {
-                        ctSrc.CancelAfter(timeout);
+                        //ctSrc.CancelAfter(timeout);
 
                         try
                         {
