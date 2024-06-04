@@ -142,17 +142,14 @@ public class PhoenixProxy : IDisposable
                             connected = true;
                             testClient.Close();
                         }
-
                         catch (Exception e)
                         {
                             if (e is TaskCanceledException || e is OperationCanceledException)
-                                _logger.LogError(e, $"Error in {nameof(PhoenixProxy)}. Timed out({timeout.TotalSeconds}) trying to test phoenix connection");
+                                _logger.LogError(e, $"Error in {nameof(PhoenixProxy)}. Timed out({timeout.TotalSeconds} seconds) trying to test phoenix connection");
                             else
                                 _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in ctor. Error message: {e.Message}");
-                        }
-                        finally
-                        {
-                            await Task.Delay(3000, linked.Token);
+
+                            await Task.Delay(3000, _ctSrc.Token);
                         }
                     }
                 }
