@@ -71,14 +71,8 @@ jobs:
       uses: Azure/setup-kubectl@v3
   
     - name: Delete old deployment
-      run: |
-        $deployment = kubectl get deployment puck-app --kubeconfig=$HOME\.kube\config\client.config 2>&1
-        if ($deployment -notmatch 'NotFound') {
-          kubectl delete deployment puck-app --kubeconfig=$HOME\.kube\config\client.config
-          Write-Host "Deployment puck-app deleted"
-        } else {
-          Write-Host "Deployment puck-app does not exist"
-        }
+      continue-on-error: true
+      run: kubectl delete deployment puck-app --kubeconfig=$HOME\.kube\config\client.config
 
     - name: Wait For Deployment To Start
       run: Start-Sleep -Seconds 12
