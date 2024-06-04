@@ -3,7 +3,7 @@ namespace Puck.Services;
 public class TemperatureControllerProxy
 {
     private readonly FujiPXFDriverProvider _prov;
-    private FujiPXFDriver _proxy;
+    private FujiPXFDriver? _proxy;
     private Func<Task<FujiPXFDriver>> _connectAction;
     private readonly SemaphoreSlim _lock;
 
@@ -115,6 +115,9 @@ public class TemperatureControllerProxy
 
         try
         {
+            if (_proxy == null)
+                throw new Exception("System proxy was null");
+
             await _proxy.DisableControlLoopAsync(ct);
         }
         finally
@@ -132,8 +135,12 @@ public class TemperatureControllerProxy
         await _lock.WaitAsync(ct);
         var startTime = DateTime.UtcNow;
 
+        if (_proxy == null)
+            throw new Exception("System proxy was null");
+
         try
         {
+
             await _proxy.SetSetValueAsync(tempSetPoint, ct);
             await _proxy.EnableControlLoopAsync(ct);
 

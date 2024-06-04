@@ -549,7 +549,7 @@ public class PhoenixAnalogInputModule_2700458 : PhoenixAnalogInputModuleBase
             var measurementRange = _defaultMeasurementConfig;
             var sampleAvg = _defaultSampleAvgConfig;
 
-            if (_configMap.TryGetValue(ioIndex, out var config))
+            if (_configMap != null && _configMap.TryGetValue(ioIndex, out var config))
             {
                 measurementRange = config.MeasurementType;
                 sampleAvg = config.SampleAverageAmount;
@@ -572,7 +572,7 @@ public class PhoenixAnalogInputModule_2700458 : PhoenixAnalogInputModuleBase
 
             var measurementRange = _defaultMeasurementConfig;
 
-            if (_configMap.TryGetValue(index, out var configVals))
+            if (_configMap != null && _configMap.TryGetValue(index, out var configVals))
                 measurementRange = configVals.MeasurementType;
 
             double data = DecodeRegisterValue(val);
@@ -659,7 +659,7 @@ public class PhoenixAnalogInputModule_2742748 : PhoenixAnalogInputModule
             var sampleAvg = _defaultSampleAvgConfig;
             var measurementRange = _defaultMeasurementConfig;
 
-            if (_configMap.TryGetValue((ushort)(i + 1), out var config))
+            if (_configMap != null && _configMap.TryGetValue((ushort)(i + 1), out var config))
             {
                 sampleAvg = config.SampleAverageAmount;
                 measurementRange = config.MeasurementType;
@@ -703,7 +703,7 @@ public class PhoenixAnalogInputModule_2742748 : PhoenixAnalogInputModule
 
             var measurementRange = _defaultMeasurementConfig;
 
-            if (_configMap.TryGetValue(index, out var configVals))
+            if (_configMap != null && _configMap.TryGetValue(index, out var configVals))
                 measurementRange = configVals.MeasurementType;
 
             double data = DecodeRegisterValue(val); // Use base function for 15 bit IB IL
@@ -820,7 +820,7 @@ public class PhoenixAnalogInputModule_2878447 : PhoenixAnalogInputModule
             var measurementRange = _defaultMeasurementConfig;
             var sampleAvg = _defaultSampleAvgConfig;
 
-            if (_configMap.TryGetValue(i, out var configVals))
+            if (_configMap != null && _configMap.TryGetValue(i, out var configVals))
             {
                 measurementRange = configVals.MeasurementType;
                 sampleAvg = configVals.SampleAverageAmount;
@@ -867,7 +867,7 @@ public class PhoenixAnalogInputModule_2878447 : PhoenixAnalogInputModule
 
             var measurementRange = _defaultMeasurementConfig;
 
-            if (_configMap.TryGetValue(index, out var configVals))
+            if (_configMap != null && _configMap.TryGetValue(index, out var configVals))
                 measurementRange = configVals.MeasurementType;
 
             double currentData = ConvertAnalogInputDataToValue(data, _analogInputScalingValues[measurementRange]);
@@ -943,7 +943,7 @@ public interface IAnalogOutputModule : IIOModule
 public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
 {
 
-    private IReadOnlyDictionary<ushort, AnalogMeasurementRange> _configMap;
+    private IReadOnlyDictionary<ushort, AnalogMeasurementRange>? _configMap;
     private readonly IModbusMaster _modbusServ;
 
     private readonly AnalogMeasurementRange _defaultMeasurementTypeConfig;
@@ -1112,7 +1112,7 @@ public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
                 x =>
                 {
                     var outputType = _defaultMeasurementTypeConfig;
-                    if (_configMap.TryGetValue((ushort)(x.address - _dataInStartAddress - 1), out var measurementType))
+                    if (_configMap != null && _configMap.TryGetValue((ushort)(x.address - _dataInStartAddress - 1), out var measurementType))
                         outputType = measurementType;
 
                     return ConvertRegisterValueToValue(DecodeRegisterBits(x.value), outputType);
@@ -1123,6 +1123,9 @@ public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
 
     public Task WriteAsync(ushort index, double value, CancellationToken ct = default)
     {
+        if (_configMap == null || !_configMap.ContainsKey(index))
+            throw new Exception($"Config map null or does not contain value for key {index}");
+
         //+2 because first two out words are configuration, + index to set correct output, -1 because 0 indexed
         return _modbusServ.WriteSingleRegisterAsync(0, (ushort)(_dataOutStartAddress + 2 + index - 1), ConvertTargetValueToRegisterVal(value, _configMap[index]));
     }
@@ -1141,7 +1144,7 @@ public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
         {
             var measurementRange = _defaultMeasurementTypeConfig;
 
-            if (_configMap.TryGetValue(i, out var measureType))
+            if (_configMap != null && _configMap.TryGetValue(i, out var measureType))
                 measurementRange = measureType;
 
             var configWord = BuildConfigurationWord(measurementRange);
@@ -1330,7 +1333,7 @@ public class IOBus : IDisposableIOBus
 
             bool moduleFound = idGrouping.TryGetValue(moduleId, out var ioIndexes);
 
-            if (moduleFound)
+            if (moduleFound && ioIndexes != null)
                 ioIndexes.Add(moduleBasedIOIndex);
             else
                 idGrouping.Add(moduleId, new List<ushort>() { moduleBasedIOIndex });
@@ -1387,7 +1390,7 @@ public class IOBus : IDisposableIOBus
 
             bool moduleFound = idGrouping.TryGetValue(modId, out var ioIndexes);
 
-            if (moduleFound)
+            if (moduleFound && ioIndexes != null)
                 ioIndexes.Add(moduleIOIndex, point.Value);
             else
                 idGrouping.Add(modId, new Dictionary<ushort, T>() { { moduleIOIndex, point.Value } });
@@ -1412,7 +1415,7 @@ public class IOBus : IDisposableIOBus
             {
                 //try to get read action
                 bool found = digitalModuleActionsModel.ModuleBasedIndexToReadActionMap.TryGetValue(kvp.Key, out var modAction);
-                if (!found)
+                if (!found || modAction == null)
                     throw new KeyNotFoundException($"{failPrefix} No module with id: {kvp.Key} found.");
 
                 //transform back to one-based bus index
@@ -1477,7 +1480,7 @@ public class IOBus : IDisposableIOBus
             {
                 //try to get read action
                 bool found = _analogInputActionsModel.ModuleBasedIndexToReadActionMap.TryGetValue(kvp.Key, out var modAction);
-                if (!found)
+                if (!found || modAction == null)
                     throw new KeyNotFoundException($"{failPrefix} No module with id: {kvp.Key} found.");
 
                 //transform back to one-based bus index
@@ -1522,7 +1525,7 @@ public class IOBus : IDisposableIOBus
             {
                 //try to get write action
                 bool found = _analogOutputActionsModel.ModuleBasedIndexToWriteActionMap.TryGetValue(kvp.Key, out var modAction);
-                if (!found)
+                if (!found || modAction == null)
                     throw new KeyNotFoundException($"{failPrefix} No module with id: {kvp.Key} found.");
 
                 var output = modAction(kvp.Value, ct);
@@ -1550,7 +1553,7 @@ public class IOBus : IDisposableIOBus
             {
                 //try to get read action
                 bool found = _analogOutputActionsModel.ModuleBasedIndexToReadActionMap.TryGetValue(kvp.Key, out var modAction);
-                if (!found)
+                if (!found || modAction == null)
                     throw new KeyNotFoundException($"{failPrefix} No module with id: {kvp.Key} found.");
 
                 var output = modAction(kvp.Value, ct);
@@ -1572,7 +1575,7 @@ public class IOBus : IDisposableIOBus
 
         found = _digitalInputActionsModel.ModuleBasedIndexToReadActionMap.TryGetValue(moduleIndex, out var action);
 
-        if (!found)
+        if (!found || action == null)
             throw new KeyNotFoundException($"{failPrefix} No digital input found with index: {index}");
 
         found = _digitalInputActionsModel.BusBasedIndexToModuleIndexMap.TryGetValue(index, out ushort modulePointIndex);
@@ -1598,7 +1601,7 @@ public class IOBus : IDisposableIOBus
 
         found = _digitalOutputActionsModel.ModuleWriteActionMap.TryGetValue(moduleIndex, out var outputAction);
 
-        if (!found)
+        if (!found || outputAction == null)
             throw new KeyNotFoundException($"{failPrefix} No output actions found for module with index: {index}");
 
         found = _digitalOutputActionsModel.BusBasedIndexToModuleIndexMap.TryGetValue(index, out ushort modulePointIndex);
@@ -1650,7 +1653,7 @@ public class IOBus : IDisposableIOBus
 
         found = _digitalOutputActionsModel.ModuleBasedIndexToReadActionMap.TryGetValue(moduleId, out var moduleAction);
 
-        if (!found)
+        if (!found || moduleAction == null)
             throw new KeyNotFoundException($"{failPrefix} No module read actions associated with specified module id: {moduleId}");
 
         found = _digitalOutputActionsModel.BusBasedIndexToModuleIndexMap.TryGetValue(index, out ushort moduleIndex);
@@ -1658,7 +1661,7 @@ public class IOBus : IDisposableIOBus
         if (!found)
             throw new KeyNotFoundException($"{failPrefix} No module based index found for bus index: {index}");
 
-        var state = (await moduleAction(new List<ushort>() { moduleIndex }, ct));
+        var state = await moduleAction(new List<ushort>() { moduleIndex }, ct);
         if (state == null || state.Count == 0)
             throw new NullReferenceException($"{failPrefix} Failed to get state of digital output: {index}");
 
@@ -1941,7 +1944,7 @@ public class PhoenixIOBusConnectionFactory : ITcpIOBusConnectionFactory
         {
             bool found = _digitalOutputModuleBuilder.TryGetValue(modInfo.IdCode, out var digOutModuleBuild);
             //TODO: throw
-            if (found)
+            if (found && digOutModuleBuild != null)
             {
                 //throw new NullReferenceException($"{failPrefix} No module plugin available for module with id code: {modInfo.IdCode}");
                 var mod = digOutModuleBuild(modbusServ, modInfo);
@@ -1981,7 +1984,7 @@ public class PhoenixIOBusConnectionFactory : ITcpIOBusConnectionFactory
         {
             bool found = _digitalInputModuleBuilder.TryGetValue(modInfo.IdCode, out var digInputModuleBuild);
             //TODO: throw
-            if (found)
+            if (found && digInputModuleBuild != null)
             {
                 //    throw new NullReferenceException($"{failPrefix} No module plugin available for module with id code: {modInfo.IdCode}");
                 var mod = digInputModuleBuild(modbusServ, modInfo);
@@ -2019,7 +2022,7 @@ public class PhoenixIOBusConnectionFactory : ITcpIOBusConnectionFactory
         {
             bool found = _analogInputModuleBuilder.TryGetValue(modInfo.IdCode, out var analogInputModuleBuild);
 
-            if (!found)
+            if (!found || analogInputModuleBuild == null)
                 throw new Exception($"Failed to bind module with id code: {modInfo.IdCode} to appropriate module driver. Please ensure module is supported");
 
             var mod = analogInputModuleBuild(modbusServ, modInfo);
@@ -2067,7 +2070,7 @@ public class PhoenixIOBusConnectionFactory : ITcpIOBusConnectionFactory
         {
             bool found = _analogOutputModuleBuilder.TryGetValue(modInfo.IdCode, out var analogOutputModuleBuild);
 
-            if (!found)
+            if (!found || analogOutputModuleBuild == null)
                 throw new Exception($"Failed to bind module with id code: {modInfo.IdCode} to appropriate module driver. Please ensure module is supported");
 
             var mod = analogOutputModuleBuild(modbusServ, modInfo);
@@ -2405,5 +2408,3 @@ public class AnalogOutputModulesActionsModel : IAnalogModulesActionsModel
     public IReadOnlyDictionary<ushort, Func<IReadOnlyDictionary<ushort, double>, CancellationToken, Task>> ModuleBasedIndexToWriteActionMap { get; }
     public IReadOnlyDictionary<ushort, Func<IEnumerable<ushort>, CancellationToken, Task<IReadOnlyDictionary<ushort, double>>>> ModuleBasedIndexToReadActionMap { get; }
 }
-
-
