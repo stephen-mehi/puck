@@ -32,7 +32,7 @@ public class SystemService : IHostedService, IDisposable
             {
                 try
                 {
-                    await _proxy.SetAllIdleInternalAsync(ct);
+                    //await _proxy.SetAllIdleInternalAsync(ct);
                     setAllIdle = true;
                 }
                 catch(Exception e)
