@@ -72,12 +72,11 @@ jobs:
   
     - name: Delete old deployment
       run: |
-        try {
-          $deployment = kubectl get deployment puck-app --kubeconfig=$HOME\.kube\config\client.config -ErrorAction Stop
+        $deployment = kubectl get deployment puck-app --kubeconfig=$HOME\.kube\config\client.config 2>&1
+        if ($deployment -notmatch 'NotFound') {
           kubectl delete deployment puck-app --kubeconfig=$HOME\.kube\config\client.config
           Write-Host "Deployment puck-app deleted"
-        }
-        catch {
+        } else {
           Write-Host "Deployment puck-app does not exist"
         }
 
