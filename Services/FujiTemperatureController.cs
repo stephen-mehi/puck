@@ -1,5 +1,3 @@
-
-
 using System;
 using System.Collections.Generic;
 using System.IO.Ports;
@@ -11,7 +9,6 @@ using NModbus;
 using NModbus.Serial;
 
 namespace Puck.Services;
-
 
 
 public class FujiPXFDriverPortConfiguration
@@ -396,4 +393,3 @@ public enum ThermocoupleSensorType
     W = 35,     // 35 : W 0 to 2300°C
     PL2 = 36    // 36 : PL-2 0 to 1300°C
 }
-

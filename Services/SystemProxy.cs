@@ -405,8 +405,6 @@ namespace puck.Services
             return ExecuteSystemActionAsync(() => SetAllIdleInternalAsync(ct), ct);
         }
 
-
-
         #region IDisposable
 
         protected void Dispose(bool disposing)
