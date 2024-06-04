@@ -14,6 +14,7 @@ spec:
       labels:
         app: puck
     spec:
+      hostNetwork: true
       containers:
       - name: puck
         image: smehi/puck:latest
