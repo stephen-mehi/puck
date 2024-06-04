@@ -124,35 +124,32 @@ public class PhoenixProxy : IDisposable
                 int port = 502;
 
                 bool connected = false;
+                var timeout = TimeSpan.FromSeconds(10);
 
-                using (var testClient = new TcpClient())
+                while (!connected)
                 {
-                    var timeout = TimeSpan.FromSeconds(10);
-
-                    while (!connected)
+                    using (var ctSrc = new CancellationTokenSource())
+                    using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
+                    using (var testClient = new TcpClient())
                     {
-                        using (var ctSrc = new CancellationTokenSource())
-                        using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
+                        ctSrc.CancelAfter(timeout);
+
+                        try
                         {
-                            ctSrc.CancelAfter(timeout);
+                            _logger.LogInformation($"Attempting to test phoenix connection using tcp client. IP: {host}");
+                            await testClient.ConnectAsync(host, port, linked.Token);
+                            _logger.LogInformation($"Connected using test client now closing connection. IP: {host}");
+                            connected = true;
+                            testClient.Close();
+                        }
+                        catch (Exception e)
+                        {
+                            if (e is TaskCanceledException || e is OperationCanceledException)
+                                _logger.LogError(e, $"Error in {nameof(PhoenixProxy)}. Timed out({timeout.TotalSeconds} seconds) trying to test phoenix connection");
+                            else
+                                _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in ctor. Error message: {e.Message}");
 
-                            try
-                            {
-                                _logger.LogInformation($"Attempting to test phoenix connection using tcp client. IP: {host}");
-                                await testClient.ConnectAsync(host, port, linked.Token);
-                                _logger.LogInformation($"Connected using test client now closing connection. IP: {host}");
-                                connected = true;
-                                testClient.Close();
-                            }
-                            catch (Exception e)
-                            {
-                                if (e is TaskCanceledException || e is OperationCanceledException)
-                                    _logger.LogError(e, $"Error in {nameof(PhoenixProxy)}. Timed out({timeout.TotalSeconds} seconds) trying to test phoenix connection");
-                                else
-                                    _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in ctor. Error message: {e.Message}");
-
-                                await Task.Delay(3000, _ctSrc.Token);
-                            }
+                            await Task.Delay(3000, _ctSrc.Token);
                         }
                     }
                 }
