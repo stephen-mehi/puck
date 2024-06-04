@@ -129,9 +129,10 @@ public class PhoenixProxy : IDisposable
                 using (var ctSrc = new CancellationTokenSource())
                 using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
                 {
+                    var timeout = TimeSpan.FromSeconds(3);
                     while (!connected)
                     {
-                        ctSrc.CancelAfter(TimeSpan.FromSeconds(3));
+                        ctSrc.CancelAfter(timeout);
 
                         try
                         {
@@ -141,9 +142,13 @@ public class PhoenixProxy : IDisposable
                             connected = true;
                             testClient.Close();
                         }
+
                         catch (Exception e)
                         {
-                            _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in ctor: {e.Message}");
+                            if (e is TaskCanceledException || e is OperationCanceledException)
+                                _logger.LogError(e, $"Error in {nameof(PhoenixProxy)}. Timed out({timeout.TotalSeconds}) trying to test phoenix connection");
+                            else
+                                _logger.LogError(e, $"Error in {nameof(PhoenixProxy)} in ctor. Error message: {e.Message}");
                         }
                         finally
                         {
@@ -153,14 +158,15 @@ public class PhoenixProxy : IDisposable
                 }
 
                 _logger.LogInformation("Attempting to connect to phoenix using modbus client");
-                
+
                 return
                     await _connectFactory.ConnectAsync(
-                        "192.168.2.50",
+                        host,
                         TimeSpan.FromSeconds(3),
                         TimeSpan.FromSeconds(1),
                         aiconfig,
                         aoConfig,
+                        port,
                         ct: _ctSrc.Token);
             });
 
