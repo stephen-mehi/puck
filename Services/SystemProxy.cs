@@ -27,6 +27,7 @@ namespace puck.Services
         private readonly SemaphoreSlim _systemLock;
         private readonly SemaphoreSlim _runLock;
         private readonly SemaphoreSlim _runScanLock;
+        private readonly PauseContainer _pauseCont;
         private Task? _scanTask;
 
         private bool _isDisposed;
@@ -47,8 +48,10 @@ namespace puck.Services
         public SystemProxy(
             ILogger<SystemService> logger,
             PhoenixProxy ioProxy,
-            TemperatureControllerProxy tempProxy)
+            TemperatureControllerProxy tempProxy,
+            PauseContainer pauseCont)
         {
+            _pauseCont = pauseCont;
             _logger = logger;
             _ioProxy = ioProxy;
             _tempProxy = tempProxy;
@@ -76,6 +79,8 @@ namespace puck.Services
                 {
                     try
                     {
+                        await _pauseCont.WaitIfPausedAsync(ct);
+                        
                         if (GetRunState() == RunState.Run)
                         {
                             _logger.LogInformation("Run starting");

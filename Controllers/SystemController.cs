@@ -13,13 +13,16 @@ public class SystemController : ControllerBase
 {
     private readonly ILogger<SystemController> _logger;
     private readonly SystemProxy _proxy;
+    private readonly PauseContainer _pauseCont;
 
     public SystemController(
         ILogger<SystemController> logger,
-        SystemProxy proxy)
+        SystemProxy proxy,
+        PauseContainer pauseCont)
     {
         _logger = logger;
         _proxy = proxy;
+        _pauseCont = pauseCont;
     }
 
     [HttpGet]
@@ -93,5 +96,23 @@ public class SystemController : ControllerBase
         _logger.LogInformation("Set recirc valve closed");
         await _proxy.SetRecirculationValveStateClosedAsync(ct);
         return Ok("Set recirc valve closed");
+    }
+
+    [HttpPost]
+    [Route("pause")]
+    public async Task<IActionResult> PostPause(CancellationToken ct = default)
+    {
+        _logger.LogInformation("Pause requested");
+        await _pauseCont.PauseAsync(ct);
+        return Ok("paused");
+    }
+
+    [HttpPost]
+    [Route("resume")]
+    public async Task<IActionResult> PostResume(CancellationToken ct = default)
+    {
+        _logger.LogInformation("Resume requested");
+        await _pauseCont.ResumeAsync(ct);
+        return Ok("resumed");
     }
 }

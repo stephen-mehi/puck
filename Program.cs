@@ -11,6 +11,7 @@ builder
     .AddSingleton<FujiPXFDriverProvider>()
     .AddSingleton<TemperatureControllerProxy>()
     .AddSingleton<SystemProxy>()
+    .AddSingleton<PauseContainer>()
     .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
