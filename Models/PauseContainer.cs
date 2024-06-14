@@ -16,7 +16,7 @@ public class PauseContainer
 
         try
         {
-            if (_pauseLock.CurrentCount == 0)
+            if (_pauseLock.CurrentCount == 1)
             {
                 await _pauseLock.WaitAsync(ct);
             }
@@ -33,7 +33,7 @@ public class PauseContainer
 
         try
         {
-            if (_pauseLock.CurrentCount == 1)
+            if (_pauseLock.CurrentCount == 0)
             {
                 _pauseLock.Release();
             }
