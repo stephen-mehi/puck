@@ -80,7 +80,7 @@ namespace puck.Services
                     try
                     {
                         await _pauseCont.WaitIfPausedAsync(ct);
-                        
+
                         if (GetRunState() == RunState.Run)
                         {
                             _logger.LogInformation("Run starting");
@@ -101,27 +101,35 @@ namespace puck.Services
                                 _logger.LogInformation("Opening recirc valve");
                                 //OPEN RECIRC
                                 await SetRecirculationValveStateOpenInternalAsync(allCtSrc.Token);
+                                await Task.Delay(100, allCtSrc.Token);
                                 //SET FIXED PUMP SPEED
+                                await ApplyPumpSpeedInternalAsync(8, allCtSrc.Token);
 
                                 _logger.LogInformation("Setting temp");
                                 //SET HEATER ENABLED AND WAIT FOR TEMP
                                 await _tempProxy.ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromSeconds(30), allCtSrc.Token);
 
                                 //TARE SCALE
+                                //TODO
                                 //OPEN GROUPHEAD VALVE
+                                await SetGroupHeadValveStateOpenInternalAsync(allCtSrc.Token);
                                 //CLOSE RECIRC 
+                                await SetRecirculationValveStateClosedInternalAsync(allCtSrc.Token);
                                 //START PID PRESSURE LOOP
+                                //TODO
                                 //RUN UNTIL SCALE REACHES WEIGHT
-                                //STOP PUMP
-                                //DISABLE HEATER
-                                //CLOSE GROUPHEAD VALVE
-                                //OPEN RECIRC
-                                //
+                                //TODO
+
                             }
                             finally
                             {
-                                await SetRunStatusIdleAsync(allCtSrc.Token);
-                                await SetAllIdleInternalAsync(allCtSrc.Token);
+                                //CLEAN UP STEPS
+                                try { await StopPumpAsync(allCtSrc.Token); } catch { }
+                                try { await _tempProxy.DisableControlLoopAsync(allCtSrc.Token); } catch { }
+                                try { await SetGroupHeadValveStateClosedInternalAsync(allCtSrc.Token); } catch { }
+                                try { await SetRunStatusIdleAsync(allCtSrc.Token); } catch { }
+                                try { await SetAllIdleInternalAsync(allCtSrc.Token); } catch { }
+
                                 _runLock.Release();
                                 _systemLock.Release();
                                 allCtSrc.Dispose();
