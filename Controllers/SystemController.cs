@@ -77,5 +77,21 @@ public class SystemController : ControllerBase
         return Ok("Set to run");
     }
 
+    [HttpPost]
+    [Route("valves/recirc/state/open")]
+    public async Task<IActionResult> PostRecircValveOpen(CancellationToken ct = default)
+    {
+        _logger.LogInformation("Set recirc valve open");
+        await _proxy.SetRecirculationValveStateOpenAsync(ct);
+        return Ok("Set recirc valve open");
+    }
 
+    [HttpPost]
+    [Route("valves/recirc/state/closed")]
+    public async Task<IActionResult> PostRecircValveClosed(CancellationToken ct = default)
+    {
+        _logger.LogInformation("Set recirc valve closed");
+        await _proxy.SetRecirculationValveStateClosedAsync(ct);
+        return Ok("Set recirc valve closed");
+    }
 }
