@@ -14,12 +14,15 @@ public class TemperatureControllerProxy
 
     private double? _processValue = null;
     private double? _setValue = null;
+    private readonly PauseContainer _pauseCont;
 
 
     public TemperatureControllerProxy(
         FujiPXFDriverProvider prov,
-        ILogger<TemperatureControllerProxy> logger)
+        ILogger<TemperatureControllerProxy> logger,
+        PauseContainer pauseCont)
     {
+        _pauseCont = pauseCont;
         _prov = prov;
         _lock = new SemaphoreSlim(1, 1);
         _ctSrc = new CancellationTokenSource();
@@ -47,6 +50,8 @@ public class TemperatureControllerProxy
             {
                 try
                 {
+                    await _pauseCont.WaitIfPausedAsync(ct);
+                    
                     if (_proxy == null || !await _proxy.IsConnectedAsync(ct))
                     {
                         await _lock.WaitAsync(ct);

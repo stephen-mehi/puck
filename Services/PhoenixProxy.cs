@@ -46,11 +46,14 @@ public class PhoenixProxy : IDisposable
     private readonly IReadOnlyList<ushort> _analogInputs;
     private readonly IReadOnlyList<ushort> _analogOutputs;
     private readonly ILogger<PhoenixProxy> _logger;
+    private readonly PauseContainer _pauseCont;
 
     public PhoenixProxy(
         ITcpIOBusConnectionFactory connectFactory,
-        ILogger<PhoenixProxy> logger)
+        ILogger<PhoenixProxy> logger,
+        PauseContainer pauseCont)
     {
+        _pauseCont = pauseCont;
         _logger = logger;
         _ctSrc = new CancellationTokenSource();
 
@@ -128,6 +131,8 @@ public class PhoenixProxy : IDisposable
 
                 while (!connected)
                 {
+                    await _pauseCont.WaitIfPausedAsync(_ctSrc.Token);
+
                     using (var ctSrc = new CancellationTokenSource())
                     using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ctSrc.Token, _ctSrc.Token))
                     using (var testClient = new TcpClient())
@@ -189,6 +194,8 @@ public class PhoenixProxy : IDisposable
             {
                 try
                 {
+                    await _pauseCont.WaitIfPausedAsync(ct);
+
                     if (_phoenix == null || !await _phoenix.IsConnectedAsync(ct))
                     {
                         await _deviceLock.WaitAsync(ct);
