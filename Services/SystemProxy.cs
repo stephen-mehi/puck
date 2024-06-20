@@ -104,7 +104,8 @@ namespace puck.Services
                                 await Task.Delay(100, allCtSrc.Token);
                                 //SET FIXED PUMP SPEED
                                 await ApplyPumpSpeedInternalAsync(8, allCtSrc.Token);
-
+                                //TODO: WAIT FOR PUMP TO START GOING ***********************************************************************
+                                
                                 _logger.LogInformation("Setting temp");
                                 //SET HEATER ENABLED AND WAIT FOR TEMP
                                 await _tempProxy.ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromSeconds(30), allCtSrc.Token);
@@ -167,6 +168,7 @@ namespace puck.Services
                                 runStopSrc.Dispose();
                                 runStopSrc = new CancellationTokenSource();
 
+                                //TODO: TRY CATCH AROUND THIS WAIT SO RUNLOCK GETS RELEASED NO MATTER WHAT
                                 await _runLock.WaitAsync(combineCtSrc.Token);
                                 _runLock.Release();
                             }
@@ -188,11 +190,13 @@ namespace puck.Services
                 finally
                 {
                     runStopSrc.Cancel();
+                    //TODO: TRY CATCH AROUND THIS TO GUARANTEE DISPOSAL
                     await scanTask;
                     runStopSrc.Dispose();
                 }
             });
 
+            TODO: JUST AWAIT
             _scanTask = Task.WhenAll(scanTask, runStateScanTask);
             await _scanTask;
         }
