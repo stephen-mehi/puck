@@ -40,10 +40,15 @@ spec:
         volumeMounts:
           - mountPath: /dev/ttyUSB0
             name: ttyusb
+          - mountPath: /dev/ttyUSB1
+            name: ttyusb1
       volumes:
         - name: ttyusb
           hostPath:
             path: /dev/ttyUSB0
+        - name: ttyusb1
+          hostPath:
+            path: /dev/ttyUSB1
 ---
 apiVersion: v1
 kind: Service

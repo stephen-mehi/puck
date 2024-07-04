@@ -10,6 +10,8 @@ builder
     .AddSingleton<PhoenixProxy>()
     .AddSingleton<FujiPXFDriverProvider>()
     .AddSingleton<TemperatureControllerProxy>()
+    .AddSingleton<TemperatureControllerConfiguration>()
+    .AddSingleton<TemperatureControllerContainer>()
     .AddSingleton<SystemProxy>()
     .AddSingleton<PauseContainer>()
     .AddHostedService<SystemService>();

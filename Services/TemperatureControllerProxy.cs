@@ -20,7 +20,8 @@ public class TemperatureControllerProxy
     public TemperatureControllerProxy(
         FujiPXFDriverProvider prov,
         ILogger<TemperatureControllerProxy> logger,
-        PauseContainer pauseCont)
+        PauseContainer pauseCont,
+        string port)
     {
         _pauseCont = pauseCont;
         _prov = prov;
@@ -29,9 +30,11 @@ public class TemperatureControllerProxy
 
         _logger = logger;
 
+        //"/dev/ttyUSB0"
+        
         var portConfig = new
             FujiPXFDriverPortConfiguration(
-                "/dev/ttyUSB0",
+                port,
                 TimeSpan.FromSeconds(3));
 
         _connectAction = new Func<Task<FujiPXFDriver>>(async () =>

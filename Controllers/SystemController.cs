@@ -31,8 +31,10 @@ public class SystemController : ControllerBase
     {
         var state = new
         {
-            Temperature = _proxy.GetProcessTemperature(),
-            TemperatureSetPoint = _proxy.GetSetPointTemperature(),
+            ThermoBlockTemperature = _proxy.GetProcessTemperature(TemperatureControllerId.ThermoBlock),
+            GroupHeadTemperature = _proxy.GetProcessTemperature(TemperatureControllerId.GroupHead),
+            ThermoBlockTemperatureSetPoint = _proxy.GetSetPointTemperature(TemperatureControllerId.ThermoBlock),
+            GroupHeadTemperatureSetPoint = _proxy.GetSetPointTemperature(TemperatureControllerId.GroupHead),
             Pressure = _proxy.GetGroupHeadPressure(),
             PumpSpeed = _proxy.GetPumpSpeedSetting(),
             RunState = _proxy.GetRunState().ToString(),

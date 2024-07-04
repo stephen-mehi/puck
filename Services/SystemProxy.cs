@@ -18,11 +18,18 @@ namespace puck.Services
         Closed = 2
     }
 
+    public enum TemperatureControllerId
+    {
+        None = 0,
+        ThermoBlock = 1,
+        GroupHead = 2
+    }
+
     public class SystemProxy : IDisposable
     {
         private readonly ILogger<SystemService> _logger;
         private readonly PhoenixProxy _ioProxy;
-        private readonly TemperatureControllerProxy _tempProxy;
+        private readonly IReadOnlyDictionary<TemperatureControllerId, TemperatureControllerProxy> _tempProxy;
         private readonly CancellationTokenSource _ctSrc;
         private readonly SemaphoreSlim _systemLock;
         private readonly SemaphoreSlim _runLock;
@@ -37,6 +44,7 @@ namespace puck.Services
 
         private readonly ushort _recircValve_IO = 1;
         private readonly ushort _groupheadValve_IO = 2;
+        private readonly ushort _backflushValve_IO = 3;
         private readonly ushort _runStatusOutput_IO = 4;
         private readonly ushort _runStatusInput_IO = 1;
         private readonly ushort _pumpSpeed_IO = 1;
@@ -48,13 +56,13 @@ namespace puck.Services
         public SystemProxy(
             ILogger<SystemService> logger,
             PhoenixProxy ioProxy,
-            TemperatureControllerProxy tempProxy,
+            TemperatureControllerContainer tempControllers,
             PauseContainer pauseCont)
         {
             _pauseCont = pauseCont;
             _logger = logger;
             _ioProxy = ioProxy;
-            _tempProxy = tempProxy;
+            _tempProxy = tempControllers.TemperatureControllers;
             _systemLock = new SemaphoreSlim(1, 1);
             _runLock = new SemaphoreSlim(1, 1);
             _runScanLock = new SemaphoreSlim(1, 1);
@@ -104,11 +112,13 @@ namespace puck.Services
                                 await Task.Delay(100, allCtSrc.Token);
                                 //SET FIXED PUMP SPEED
                                 await ApplyPumpSpeedInternalAsync(8, allCtSrc.Token);
-                                //TODO: WAIT FOR PUMP TO START GOING ***********************************************************************
-                                
+                                await Task.Delay(TimeSpan.FromMilliseconds(750), allCtSrc.Token);
+
                                 _logger.LogInformation("Setting temp");
                                 //SET HEATER ENABLED AND WAIT FOR TEMP
-                                await _tempProxy.ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromSeconds(30), allCtSrc.Token);
+                                await _tempProxy[TemperatureControllerId.GroupHead].ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromSeconds(30), allCtSrc.Token);
+                                await _tempProxy[TemperatureControllerId.ThermoBlock].ApplySetPointSynchronouslyAsync(100, 2, TimeSpan.FromSeconds(30), allCtSrc.Token);
+
 
                                 //TARE SCALE
                                 //TODO
@@ -126,7 +136,8 @@ namespace puck.Services
                             {
                                 //CLEAN UP STEPS
                                 try { await StopPumpAsync(allCtSrc.Token); } catch { }
-                                try { await _tempProxy.DisableControlLoopAsync(allCtSrc.Token); } catch { }
+                                try { await _tempProxy[TemperatureControllerId.ThermoBlock].DisableControlLoopAsync(allCtSrc.Token); } catch { }
+                                try { await _tempProxy[TemperatureControllerId.GroupHead].DisableControlLoopAsync(allCtSrc.Token); } catch { }
                                 try { await SetGroupHeadValveStateClosedInternalAsync(allCtSrc.Token); } catch { }
                                 try { await SetRunStatusIdleAsync(allCtSrc.Token); } catch { }
                                 try { await SetAllIdleInternalAsync(allCtSrc.Token); } catch { }
@@ -168,7 +179,6 @@ namespace puck.Services
                                 runStopSrc.Dispose();
                                 runStopSrc = new CancellationTokenSource();
 
-                                //TODO: TRY CATCH AROUND THIS WAIT SO RUNLOCK GETS RELEASED NO MATTER WHAT
                                 await _runLock.WaitAsync(combineCtSrc.Token);
                                 _runLock.Release();
                             }
@@ -190,15 +200,19 @@ namespace puck.Services
                 finally
                 {
                     runStopSrc.Cancel();
-                    //TODO: TRY CATCH AROUND THIS TO GUARANTEE DISPOSAL
-                    await scanTask;
-                    runStopSrc.Dispose();
+
+                    try
+                    {
+                        await scanTask;
+                    }
+                    finally
+                    {
+                        runStopSrc.Dispose();
+                    }
                 }
             });
 
-            TODO: JUST AWAIT
-            _scanTask = Task.WhenAll(scanTask, runStateScanTask);
-            await _scanTask;
+            await Task.WhenAll(scanTask, runStateScanTask);
         }
 
         private AnalogIoState? GetAnalogInputState(ushort index)
@@ -273,6 +287,12 @@ namespace puck.Services
             return state;
         }
 
+        public ValveState GetBackFlushValveState()
+        {
+            var state = GetValveState(_backflushValve_IO);
+            return state;
+        }
+
 
         public double? GetPumpSpeedSetting()
         {
@@ -289,16 +309,16 @@ namespace puck.Services
         }
 
 
-        public double? GetProcessTemperature()
+        public double? GetProcessTemperature(TemperatureControllerId controllerId)
         {
-            var temp = _tempProxy.GetProcessValue();
+            var temp = _tempProxy[controllerId].GetProcessValue();
 
             return temp;
         }
 
-        public double? GetSetPointTemperature()
+        public double? GetSetPointTemperature(TemperatureControllerId controllerId)
         {
-            var temp = _tempProxy.GetSetValue();
+            var temp = _tempProxy[controllerId].GetSetValue();
 
             return temp;
         }
@@ -345,9 +365,9 @@ namespace puck.Services
             return _ioProxy.SetDigitalOutputStateAsync(_runStatusOutput_IO, false, ct);
         }
 
-        private Task SetTemperatureSetpointInternalAsync(int setpoint, CancellationToken ct)
+        private Task SetTemperatureSetpointInternalAsync(int setpoint, TemperatureControllerId controllerId, CancellationToken ct)
         {
-            return _tempProxy.SetSetPointAsync(setpoint, ct);
+            return _tempProxy[controllerId].SetSetPointAsync(setpoint, ct);
         }
 
         public Task SetTemperatureSetpointAsync(int setpoint, CancellationToken ct)
@@ -375,6 +395,8 @@ namespace puck.Services
             return ExecuteSystemActionAsync(() => StopPumpInternalAsync(ct), ct);
         }
 
+
+        //GROUPHEAD
         private Task SetGroupHeadValveStateOpenInternalAsync(CancellationToken ct)
         {
             return _ioProxy.SetDigitalOutputStateAsync(_groupheadValve_IO, true, ct);
@@ -395,6 +417,29 @@ namespace puck.Services
             return ExecuteSystemActionAsync(() => SetGroupHeadValveStateClosedInternalAsync(ct), ct);
         }
 
+        //BACKFLUSH
+        private Task SetBackFlushValveStateOpenInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_backflushValve_IO, true, ct);
+        }
+
+        public Task SetBackFlushValveStateOpenAsync(CancellationToken ct)
+        {
+            return ExecuteSystemActionAsync(() => SetBackFlushValveStateOpenInternalAsync(ct), ct);
+        }
+
+        private Task SetBackFlushValveStateClosedInternalAsync(CancellationToken ct)
+        {
+            return _ioProxy.SetDigitalOutputStateAsync(_backflushValve_IO, false, ct);
+        }
+
+        public Task SetBackFlushValveStateClosedAsync(CancellationToken ct)
+        {
+            return ExecuteSystemActionAsync(() => SetBackFlushValveStateClosedInternalAsync(ct), ct);
+        }
+
+
+        //RECIRC
         private Task SetRecirculationValveStateOpenInternalAsync(CancellationToken ct)
         {
             return _ioProxy.SetDigitalOutputStateAsync(_recircValve_IO, true, ct);
@@ -417,12 +462,14 @@ namespace puck.Services
 
         public async Task SetAllIdleInternalAsync(CancellationToken ct)
         {
-            await _tempProxy.DisableControlLoopAsync(ct);
+            await _tempProxy[TemperatureControllerId.GroupHead].DisableControlLoopAsync(ct);
+            await _tempProxy[TemperatureControllerId.ThermoBlock].DisableControlLoopAsync(ct);
             await StopPumpInternalAsync(ct);
             await SetRecirculationValveStateOpenInternalAsync(ct);
             await Task.Delay(250, ct);
             await SetGroupHeadValveStateClosedInternalAsync(ct);
             await SetRecirculationValveStateClosedInternalAsync(ct);
+            await SetBackFlushValveStateClosedInternalAsync(ct);
         }
 
         public Task SetAllIdleAsync(CancellationToken ct)
@@ -442,7 +489,8 @@ namespace puck.Services
                 try { _ctSrc?.Cancel(); } catch (Exception) { }
                 try { _scanTask?.Wait(5000); } catch (Exception) { }
                 try { _ioProxy?.Dispose(); } catch (Exception) { }
-                try { _tempProxy?.Dispose(); } catch (Exception) { }
+                try { _tempProxy[TemperatureControllerId.ThermoBlock]?.Dispose(); } catch (Exception) { }
+                try { _tempProxy[TemperatureControllerId.GroupHead]?.Dispose(); } catch (Exception) { }
                 try { _ctSrc?.Dispose(); } catch (Exception) { }
                 try { _runLock?.Dispose(); } catch (Exception) { }
                 try { _runScanLock?.Dispose(); } catch (Exception) { }
