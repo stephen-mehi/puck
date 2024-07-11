@@ -3,6 +3,19 @@ using Puck.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+//default run parameters
+var runParams =
+    new RunParameters()
+    {
+        InitialPumpSpeed = 8,
+        MaxExtractionSeconds = 60,
+        ExtractionWeightGrams = 10,
+        GroupHeadTemperatureFarenheit = 100,
+        ThermoblockTemperatureFarenheit = 100,
+        TargetPressureBar = 5,
+        PreExtractionTargetTemperatureFarenheit = 100
+    };
+
 // Add services to the container.
 builder
     .Services
@@ -13,7 +26,11 @@ builder
     .AddSingleton<TemperatureControllerConfiguration>()
     .AddSingleton<TemperatureControllerContainer>()
     .AddSingleton<SystemProxy>()
+    .AddSingleton(new PID(kp: 1, ki: 1, kd: 1, n: 1, outputUpperLimit: 6, outputLowerLimit: 1))
     .AddSingleton<PauseContainer>()
+    .AddSingleton<RunResultRepo>()
+    .AddSingleton<RunParametersRepo>()
+    .AddSingleton(runParams)
     .AddHostedService<SystemService>();
 
 builder.Services.AddControllers();
