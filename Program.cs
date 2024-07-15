@@ -1,4 +1,4 @@
-using puck.Services;
+
 using Puck.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -22,7 +22,6 @@ builder
     .AddSingleton<ITcpIOBusConnectionFactory, PhoenixIOBusConnectionFactory>()
     .AddSingleton<PhoenixProxy>()
     .AddSingleton<FujiPXFDriverProvider>()
-    .AddSingleton<TemperatureControllerProxy>()
     .AddSingleton<TemperatureControllerConfiguration>()
     .AddSingleton<TemperatureControllerContainer>()
     .AddSingleton<SystemProxy>()
@@ -58,9 +57,19 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
+    app.UseDeveloperExceptionPage();
+    app.UseCors(builder =>
+        builder.WithOrigins("http://localhost:3000")
+               .AllowAnyHeader()
+               .AllowAnyMethod());
+
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+
+app.UseHttpsRedirection();
+app.UseStaticFiles();
+app.UseRouting();
 
 // app.UseAuthorization();
 app.UseCors(x =>
@@ -71,6 +80,7 @@ app.UseCors(x =>
     .SetIsOriginAllowed(y => true)
     .AllowCredentials();
 });
+
 
 app.MapControllers();
 

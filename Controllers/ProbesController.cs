@@ -2,7 +2,6 @@ using System.ComponentModel.DataAnnotations;
 using System.IO.Ports;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
-using puck.Services;
 using Puck.Services;
 
 namespace Puck.Controllers;

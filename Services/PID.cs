@@ -1,7 +1,7 @@
 ﻿using System;
 
 
-namespace puck.Services;
+namespace Puck.Services;
 
 public class PidControlLoop : IDisposable
 {

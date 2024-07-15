@@ -3,7 +3,7 @@ using Puck.Services;
 using System.Runtime.CompilerServices;
 using System.Text;
 
-namespace puck.Services
+namespace Puck.Services
 {
     public class RunParameters
     {
