@@ -8,7 +8,7 @@ network:
     wlp0s20f3:
       access-points:
         NETGEAR09-5G:
-          password: vastocean829
+          password: x
       dhcp4: no
       dhcp6: no
       addresses: [192.168.1.12/24]
