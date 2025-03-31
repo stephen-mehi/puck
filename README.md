@@ -1,4 +1,7 @@
 # puck
+
+
+# Networking and deployment
 This repo uses github actions that target a windows agent. The deployment target is a NUC computer with ubuntu server running a microk8s cluster. Special networking configuration was required. The NUC has two network adapters: ethernet and wifi. Both needed to have static ip addresses. The wifi so the NUC can keep a consistent ip for reaching from browser and ssh, and the ethernet because it is hardwired to a network enabled modbus io device so has no way to have an ip address assigned from a dhcp server. The default network config tool on ubuntu server is networkd, but it seems to dynamically remove the static ip on ethernet adapters when ethernet cabels are unplugged. This is unacceptable as it forces pods to be restarted. Therefore networkd was disabled and NetworkManager was used in its place. NetPlan is the high level tool for specifying network configuration. This is the config used for the wifi stored at etc/netplan/<file>.yaml:
 
 network:
