@@ -10,7 +10,7 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Puck.Services;
+namespace puck.Services.IoBus;
 
 public static class RangeMapper
 {
@@ -75,7 +75,7 @@ public abstract class PhoenixDigitalModuleBase : PhoenixIOModuleBase, IIOModule
         ushort targetAddess)
     {
         //calculates the start address for a given register within a module
-        ushort ioIndex = (ushort)(((endAddress - targetAddess) * 16));
+        ushort ioIndex = (ushort)((endAddress - targetAddess) * 16);
         return ioIndex;
     }
 
@@ -84,7 +84,7 @@ public abstract class PhoenixDigitalModuleBase : PhoenixIOModuleBase, IIOModule
         //register addresses decrease as io index increases
         //This is reversed from the expected mapping of io indexes onto register addresses
         //given 1-based io index 16 and end address 5, target address is 5
-        ushort targetAddress = (ushort)(endAddress - ((ioIndex - 1) / 16));
+        ushort targetAddress = (ushort)(endAddress - (ioIndex - 1) / 16);
         return targetAddress;
     }
 
@@ -132,8 +132,8 @@ public class PhoenixDigitalInputModule : PhoenixDigitalModuleBase, IDigitalInput
 
         //READ ALL REGISTERS FOR THIS MODULE
         var regVals =
-            (await _modbusServ.ReadInputRegistersAsync(0, _startAddress, _wordCount)
-            .ConfigureAwait(false));
+            await _modbusServ.ReadInputRegistersAsync(0, _startAddress, _wordCount)
+            .ConfigureAwait(false);
 
         var stateMap = new Dictionary<ushort, bool>();
 
@@ -152,7 +152,7 @@ public class PhoenixDigitalInputModule : PhoenixDigitalModuleBase, IDigitalInput
                 {
                     //shift to correct bit, isolate, and see if high or low
                     //phoenix input 0 maps to LSB i.e. bit 0 
-                    bool state = ((regVals[i] >> j) & 1) == 1;
+                    bool state = (regVals[i] >> j & 1) == 1;
                     stateMap.Add(index, state);
                 }
             }
@@ -169,7 +169,7 @@ public class PhoenixDigitalInputModule : PhoenixDigitalModuleBase, IDigitalInput
         //register addresses decrease as io index increases
         //This is reversed from the expected mapping of io indexes onto register addresses
         //given 1-based io index 16 and end address 5, target address is 5
-        ushort targetAddress = (ushort)(_endAddress - ((ioIndex - 1) / 16));
+        ushort targetAddress = (ushort)(_endAddress - (ioIndex - 1) / 16);
 
         //adjust target register address according to requested io index
         ushort targetWordAddress = GetTargetAddressByIOIndex(ioIndex, _endAddress);
@@ -181,7 +181,7 @@ public class PhoenixDigitalInputModule : PhoenixDigitalModuleBase, IDigitalInput
         //(i.e. get index within the target register from io index)
         ushort adjustedIndex = (ushort)(ioIndex - (_endAddress - targetAddress) * 16);
 
-        var state = ((val >> (16 - adjustedIndex)) & 1) == 1;
+        var state = (val >> 16 - adjustedIndex & 1) == 1;
         return state;
     }
 
@@ -278,7 +278,7 @@ public class PhoenixDigitalOutputModule : PhoenixDigitalInputModule, IDigitalOut
         int start = 0b00000000_00000000;
 
         foreach (var targetIndex in targetHighBitIndexes)
-            start |= 1 << (targetIndex - 1);
+            start |= 1 << targetIndex - 1;
 
         return Convert.ToUInt16(start);
     }
@@ -288,7 +288,7 @@ public class PhoenixDigitalOutputModule : PhoenixDigitalInputModule, IDigitalOut
         int start = 0b11111111_11111111;
 
         foreach (var targetIndex in targetHighBitIndexes)
-            start ^= 1 << (targetIndex - 1);
+            start ^= 1 << targetIndex - 1;
 
         return Convert.ToUInt16(start);
     }
@@ -398,7 +398,7 @@ public abstract class PhoenixAnalogInputModuleBase : IAnalogInputModule
     virtual protected double DecodeRegisterValue(ushort registerValue)
     {
         bool isNegative = registerValue >> 15 == 1;
-        var data = (registerValue & 0b_01111111_11111111);
+        var data = registerValue & 0b_01111111_11111111;
         data = isNegative ? -((ushort)~registerValue + 1) : data;
 
         return data;
@@ -587,7 +587,7 @@ public class PhoenixAnalogInputModule_2700458 : PhoenixAnalogInputModuleBase
     override protected double DecodeRegisterValue(ushort registerValue)
     {
         bool isNegative = registerValue >> 15 == 1;
-        var data = (registerValue & 0b_01111111_11111000);
+        var data = registerValue & 0b_01111111_11111000;
         data = isNegative ? -((ushort)~registerValue + 1) : data;
 
         return data;
@@ -646,7 +646,7 @@ public class PhoenixAnalogInputModule_2742748 : PhoenixAnalogInputModule
 
         for (ushort i = 0; i < GetNumberOfIOPoints(); i++)
         {
-            ushort commandWord = (ushort)(commandWordBase | (i << 8));
+            ushort commandWord = (ushort)(commandWordBase | i << 8);
 
             //send configure command
             await WriteCommandUntilMirrored(commandWord, initTimeout - (DateTime.UtcNow - startTime), ct);
@@ -690,7 +690,7 @@ public class PhoenixAnalogInputModule_2742748 : PhoenixAnalogInputModule
         foreach (var index in indexes)
         {
             //take measurement command with current index selection
-            ushort measurementCmd = (ushort)((index - 1) << 8);
+            ushort measurementCmd = (ushort)(index - 1 << 8);
 
             await WriteCommandUntilMirrored(measurementCmd, TimeSpan.FromSeconds(3), ct);
 
@@ -1000,7 +1000,7 @@ public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
             throw new Exception("Currently only 4-20mA and 0-10V supported");
         }
 
-        var finalOutput = (Convert.ToUInt16(Math.Round(output)) & 0b01111111_11110000);
+        var finalOutput = Convert.ToUInt16(Math.Round(output)) & 0b01111111_11110000;
         return (ushort)finalOutput;
     }
 
@@ -1053,7 +1053,7 @@ public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
             readVal = (await _modbusServ.ReadInputRegistersAsync(0, inAddress, 1))[0];
             readVal &= 0b00000000_00111111;
 
-            if ((DateTime.UtcNow - startTime) > timeout)
+            if (DateTime.UtcNow - startTime > timeout)
             {
                 readVal = (await _modbusServ.ReadInputRegistersAsync(0, inAddress, 1))[0];
 
@@ -1092,7 +1092,7 @@ public class PhoenixAnalogOutputModule_2700775 : IAnalogOutputModule
         ushort regVal)
     {
         bool isNegative = regVal >> 15 == 1;
-        var val = (regVal & 0b_01111111_11110000);
+        var val = regVal & 0b_01111111_11110000;
         val = isNegative ? -val : val;
         return val;
     }

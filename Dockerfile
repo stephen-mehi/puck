@@ -7,13 +7,14 @@ EXPOSE 8080
 RUN usermod -aG dialout app
 
 USER app
+
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG configuration=Release
 WORKDIR /src
-COPY ["puck.csproj", "./"]
-RUN dotnet restore "puck.csproj"
-COPY . .
-WORKDIR "/src/."
+COPY ["puck/puck.csproj", "puck/"]
+RUN dotnet restore "puck/puck.csproj"
+COPY puck/. ./puck/
+WORKDIR "/src/puck"
 RUN dotnet build "puck.csproj" -c $configuration -o /app/build
 
 FROM build AS publish

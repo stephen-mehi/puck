@@ -10,6 +10,8 @@ public class PauseContainer
 
     }
 
+    public bool IsPaused => _pauseLock.CurrentCount == 0;
+
     public async Task PauseAsync(CancellationToken ct)
     {
         await _pauseStateLock.WaitAsync(ct);

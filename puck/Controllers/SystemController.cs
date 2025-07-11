@@ -56,7 +56,7 @@ public class SystemController : ControllerBase
     public async Task<IActionResult> PostRunStatusIdle(CancellationToken ct = default)
     {
         _logger.LogInformation("Posted idle");
-        await _proxy.SetRunStatusIdleAsync(ct);
+        await _proxy.SetRunStateIdleAsync(ct);
         return Ok("Set to idle");
     }
 

@@ -1,7 +1,7 @@
 using System.Net.Sockets;
 using System.Reactive;
 
-namespace Puck.Services;
+namespace puck.Services.IoBus;
 
 public struct DigitalIoState
 {
@@ -31,7 +31,7 @@ public struct AnalogIoState
     public DateTime TimeStamp { get; }
 }
 
-public class PhoenixProxy : IDisposable
+public class PhoenixProxy : IPhoenixProxy, IDisposable
 {
 
     private readonly ITcpIOBusConnectionFactory _connectFactory;

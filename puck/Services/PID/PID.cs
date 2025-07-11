@@ -1,7 +1,7 @@
 ﻿using System;
 
 
-namespace Puck.Services;
+namespace puck.Services.PID;
 
 public class PidControlLoop : IDisposable
 {
@@ -207,7 +207,7 @@ public class PID
         TimeSpan ts)
     {
         // Ensure the timespan is not too small or zero.
-        _samplePeriod = (ts.TotalSeconds >= _tsMin) ? ts.TotalSeconds : _tsMin;
+        _samplePeriod = ts.TotalSeconds >= _tsMin ? ts.TotalSeconds : _tsMin;
 
         // Calculate rollup parameters
         _K = 2 / _samplePeriod;

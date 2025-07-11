@@ -3,23 +3,24 @@ using Puck.Services;
 
 public class RunResultRepo
 {
-    private RunResult _latest;
+    private RunResult? _latestRunResult;
     private readonly object _lock = new object();
 
 
     public RunResult? GetLatestRunResultOrDefault()
     {
-        return _latest;
+        return _latestRunResult;
     }
 
-    public void SetLatestRunResult(RunResult runResult)
+    public void SetLatestRunResult(RunResult result)
     {
-        lock (_lock)
-        {
-            _latest = runResult;
-        }
+        _latestRunResult = result;
     }
 
+    public RunResult? GetLatestRunResult()
+    {
+        return _latestRunResult;
+    }
 
     public void Commit()
     {

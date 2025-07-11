@@ -1,6 +1,9 @@
-namespace Puck.Services;
+using Puck.Services;
+using Puck.Services.TemperatureController;
 
-public class TemperatureControllerProxy
+namespace puck.Services.TemperatureController;
+
+public class TemperatureControllerProxy : ITemperatureController
 {
     private readonly FujiPXFDriverProvider _prov;
     private FujiPXFDriver? _proxy;
@@ -39,7 +42,7 @@ public class TemperatureControllerProxy
 
         _connectAction = new Func<Task<FujiPXFDriver>>(async () =>
         {
-            return await (new FujiPXFDriverProvider()).ConnectAsync(portConfig);
+            return await new FujiPXFDriverProvider().ConnectAsync(portConfig);
         });
 
         _task = StartReadLoop(_ctSrc.Token);
