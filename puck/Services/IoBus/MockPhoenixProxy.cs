@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Reactive.Subjects;
 
 namespace puck.Services.IoBus
 {
@@ -13,6 +14,7 @@ namespace puck.Services.IoBus
         private readonly Dictionary<ushort, AnalogIoState?> _analogInputState = new();
         private readonly Dictionary<ushort, AnalogIoState?> _analogOutputState = new();
         private bool _disposed;
+        private readonly BehaviorSubject<bool> _isConnected = new BehaviorSubject<bool>(true);
 
         public MockPhoenixProxy(
             IEnumerable<ushort>? digitalInputs = null,
@@ -34,6 +36,8 @@ namespace puck.Services.IoBus
         public IReadOnlyDictionary<ushort, DigitalIoState?> DigitalOutputState => _digitalOutputState;
         public IReadOnlyDictionary<ushort, AnalogIoState?> AnalogInputState => _analogInputState;
         public IReadOnlyDictionary<ushort, AnalogIoState?> AnalogOutputState => _analogOutputState;
+        public IObservable<bool> IsConnected => _isConnected;
+        public bool IsCurrentlyConnected => _isConnected.Value;
 
         public Task SetDigitalOutputStateAsync(ushort index, bool state, CancellationToken ct)
         {
@@ -82,6 +86,13 @@ namespace puck.Services.IoBus
         public void Dispose()
         {
             _disposed = true;
+            _isConnected.OnCompleted();
+        }
+
+        // For test code to simulate connection/disconnection
+        public void SetConnectionState(bool connected)
+        {
+            _isConnected.OnNext(connected);
         }
     }
 } 

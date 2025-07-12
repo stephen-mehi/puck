@@ -85,6 +85,14 @@ namespace Puck.Services
     public record RunStateChanged(RunState NewState) : SystemStateDelta;
     public record TemperatureSetpointChanged(TemperatureControllerId Controller, double? NewSetpoint) : SystemStateDelta;
     public record StatusMessageChanged(string Message) : SystemStateDelta;
+    public record ConnectionChanged(bool IsConnected) : SystemStateDelta;
+    public record PidParametersChanged(
+        double Kp, double Ki, double Kd, double N,
+        double OutputUpper, double OutputLower
+    ) : SystemStateDelta;
+    public record PressureChanged(double? NewValue) : SystemStateDelta;
+    public record RunStarted(DateTime StartTimeUtc) : SystemStateDelta;
+    public record ExtractionWeightChanged(double? Weight) : SystemStateDelta;
     // Add more as needed
 
     public class SystemProxy : IDisposable
@@ -103,6 +111,7 @@ namespace Puck.Services
 
         private Task? _scanTask;
         private bool _isDisposed;
+        private IDisposable? _connectionSub;
 
         // IO Mapping (configurable)
         private readonly ushort _recircValveIO;
@@ -126,10 +135,8 @@ namespace Puck.Services
         private readonly int _setAllIdleRecircOpenDelayMs;
 
         private readonly Subject<SystemStateDelta> _stateDeltaSubject = new();
-        private readonly IObservable<ProcessDeviceState> _stateObservable;
-        private ProcessDeviceState _currentState;
-
-        public IObservable<ProcessDeviceState> StateObservable => _stateObservable;
+        private readonly BehaviorSubject<ProcessDeviceState> _stateSubject;
+        public IObservable<ProcessDeviceState> StateObservable => _stateSubject.AsObservable();
 
         public SystemProxy(
             ILogger<SystemService> logger,
@@ -190,12 +197,21 @@ namespace Puck.Services
             _runStateMonitorDelayMs = runStateMonitorDelayMs;
             _pumpStopValue = pumpStopValue;
             _setAllIdleRecircOpenDelayMs = setAllIdleRecircOpenDelayMs;
-            _currentState = GetInitialProcessDeviceState();
-            _stateObservable = _stateDeltaSubject
-                .Scan(_currentState, (state, delta) => Reduce(state, delta))
-                .Do(s => _currentState = s)
-                .Replay(1)
-                .RefCount();
+            _stateSubject = new BehaviorSubject<ProcessDeviceState>(GetInitialProcessDeviceState());
+            _stateDeltaSubject.Subscribe(delta =>
+            {
+                var newState = Reduce(_stateSubject.Value, delta);
+                _stateSubject.OnNext(newState);
+            });
+
+            // Subscribe to connection state changes
+            _connectionSub = _ioProxy.IsConnected.Subscribe(connected =>
+            {
+                _logger.LogWarning($"PhoenixProxy connection state changed: {(connected ? "Connected" : "Disconnected")}");
+                _stateDeltaSubject.OnNext(new ConnectionChanged(connected));
+            });
+            // Initialize connection state
+            _stateDeltaSubject.OnNext(new ConnectionChanged(_ioProxy.IsCurrentlyConnected));
         }
 
         private ProcessDeviceState GetInitialProcessDeviceState()
@@ -224,8 +240,6 @@ namespace Puck.Services
                 pid_N: null,
                 pid_OutputUpperLimit: null,
                 pid_OutputLowerLimit: null,
-                pid_LastOutput: null,
-                pid_LastError: null,
                 stateTimestampUtc: now
             );
         }
@@ -258,6 +272,20 @@ namespace Puck.Services
                     _ => oldState
                 },
                 StatusMessageChanged(var msg) => oldState with { GeneralStatusMessage = msg, StateTimestampUtc = now },
+                ConnectionChanged(var isConnected) => oldState with { IsIoBusConnected = isConnected, StateTimestampUtc = now },
+                PidParametersChanged(var kp, var ki, var kd, var n, var outU, var outL)
+                    => oldState with {
+                        PID_Kp = kp, 
+                        PID_Ki = ki,
+                        PID_Kd = kd,
+                        PID_N = n,
+                        PID_OutputUpperLimit = outU,
+                        PID_OutputLowerLimit = outL,
+                        StateTimestampUtc = now
+                    },
+                PressureChanged(var newValue) => oldState with { GroupHeadPressure = newValue, StateTimestampUtc = now },
+                RunStarted(var startTime) => oldState with { RunStartTimeUtc = startTime, StateTimestampUtc = now },
+                ExtractionWeightChanged(var weight) => oldState with { ExtractionWeight = weight, StateTimestampUtc = now },
                 _ => oldState
             };
         }
@@ -342,8 +370,20 @@ namespace Puck.Services
                             {
                                 _logger.LogInformation("Run starting");
                                 _stateDeltaSubject.OnNext(new StatusMessageChanged("Run starting"));
+                                // Emit PID parameters at start
+                                _stateDeltaSubject.OnNext(new PidParametersChanged(
+                                    _pid.Kp, 
+                                    _pid.Ki,
+                                    _pid.Kd,
+                                    _pid.N,
+                                    _pid.OutputUpperLimit, 
+                                    _pid.OutputLowerLimit
+                                ));
 
                                 // --- Espresso control logic begins ---
+
+                                // Mark run start time in state
+                                _stateDeltaSubject.OnNext(new RunStarted(starttime));
 
                                 // Close backflush valve
                                 _logger.LogInformation("Closing backflush valve");
@@ -370,11 +410,11 @@ namespace Puck.Services
                                 // Set heater enabled and wait for temperature
                                 _logger.LogInformation($"Setting temp to: {runParams.GroupHeadTemperatureFarenheit}");
                                 _stateDeltaSubject.OnNext(new StatusMessageChanged($"Setting temp to: {runParams.GroupHeadTemperatureFarenheit}"));
-                                await _tempProxy[TemperatureControllerId.GroupHead].ApplySetPointSynchronouslyAsync(runParams.GroupHeadTemperatureFarenheit, _tempSettleTolerance, TimeSpan.FromSeconds(_tempSettleTimeoutSec), allCtSrc.Token);
+                                await SetTemperatureAndEmitStateAsync(TemperatureControllerId.GroupHead, runParams.GroupHeadTemperatureFarenheit, allCtSrc.Token);
 
                                 _logger.LogInformation($"Setting temp to: {runParams.ThermoblockTemperatureFarenheit}");
                                 _stateDeltaSubject.OnNext(new StatusMessageChanged($"Setting temp to: {runParams.ThermoblockTemperatureFarenheit}"));
-                                await _tempProxy[TemperatureControllerId.ThermoBlock].ApplySetPointSynchronouslyAsync(runParams.ThermoblockTemperatureFarenheit, _tempSettleTolerance, TimeSpan.FromSeconds(_tempSettleTimeoutSec), allCtSrc.Token);
+                                await SetTemperatureAndEmitStateAsync(TemperatureControllerId.ThermoBlock, runParams.ThermoblockTemperatureFarenheit, allCtSrc.Token);
 
                                 // Tare scale (TODO)
                                 // Open grouphead valve
@@ -402,7 +442,9 @@ namespace Puck.Services
                                     }
 
                                     weight += _extractionWeightIncrement;
+                                    _stateDeltaSubject.OnNext(new ExtractionWeightChanged(weight));
                                     var pressure = GetGroupHeadPressure();
+                                    _stateDeltaSubject.OnNext(new PressureChanged(pressure));
 
                                     if (!pressure.HasValue)
                                     {
@@ -413,8 +455,10 @@ namespace Puck.Services
                                         throw new Exception(msg);
                                     }
 
-                                    var groupTemp = _tempProxy[TemperatureControllerId.GroupHead].GetProcessValue();
-                                    var thermoblockTemp = _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValue();
+                                    var groupTempLoop = _tempProxy[TemperatureControllerId.GroupHead].GetProcessValue();
+                                    var thermoblockTempLoop = _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValue();
+                                    _stateDeltaSubject.OnNext(new TemperatureChanged(TemperatureControllerId.GroupHead, groupTempLoop));
+                                    _stateDeltaSubject.OnNext(new TemperatureChanged(TemperatureControllerId.ThermoBlock, thermoblockTempLoop));
 
                                     // Wait between PID iterations, responsive to cancellation
                                     await Task.Delay(TimeSpan.FromMilliseconds(_pidLoopDelayMs), allCtSrc.Token);
@@ -443,6 +487,11 @@ namespace Puck.Services
                                 currentRes.EndTimeUTC = DateTime.UtcNow;
 
                                 _stateDeltaSubject.OnNext(new StatusMessageChanged("Completed extraction run "));
+                                // Emit PID parameters at end
+                                _stateDeltaSubject.OnNext(new PidParametersChanged(
+                                    _pid.Kp, _pid.Ki, _pid.Kd, _pid.N,
+                                    _pid.OutputUpperLimit, _pid.OutputLowerLimit
+                                ));
 
                                 if (stateSub != null)
                                 {
@@ -870,6 +919,15 @@ namespace Puck.Services
             _stateDeltaSubject.OnNext(new PausedChanged(isPaused));
         }
 
+        // Wrapper to set temperature and emit state changes
+        private async Task SetTemperatureAndEmitStateAsync(TemperatureControllerId controllerId, int setpoint, CancellationToken ct)
+        {
+            await _tempProxy[controllerId].ApplySetPointSynchronouslyAsync(setpoint, _tempSettleTolerance, TimeSpan.FromSeconds(_tempSettleTimeoutSec), ct);
+            _stateDeltaSubject.OnNext(new TemperatureSetpointChanged(controllerId, setpoint));
+            var temp = _tempProxy[controllerId].GetProcessValue();
+            _stateDeltaSubject.OnNext(new TemperatureChanged(controllerId, temp));
+        }
+
         #region IDisposable
 
         protected void Dispose(bool disposing)
@@ -888,6 +946,7 @@ namespace Puck.Services
                 try { _runLock?.Dispose(); } catch (Exception) { }
                 try { _runScanLock?.Dispose(); } catch (Exception) { }
                 try { _systemLock?.Dispose(); } catch (Exception) { }
+                try { _connectionSub?.Dispose(); } catch (Exception) { }
             }
 
             _isDisposed = true;

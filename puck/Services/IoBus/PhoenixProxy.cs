@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Reactive;
+using System.Reactive.Subjects;
 
 namespace puck.Services.IoBus;
 
@@ -47,6 +48,7 @@ public class PhoenixProxy : IPhoenixProxy, IDisposable
     private readonly IReadOnlyList<ushort> _analogOutputs;
     private readonly ILogger<PhoenixProxy> _logger;
     private readonly PauseContainer _pauseCont;
+    private readonly BehaviorSubject<bool> _isConnected = new BehaviorSubject<bool>(false);
 
     public PhoenixProxy(
         ITcpIOBusConnectionFactory connectFactory,
@@ -184,6 +186,8 @@ public class PhoenixProxy : IPhoenixProxy, IDisposable
     public IReadOnlyDictionary<ushort, AnalogIoState?> AnalogInputState => _analogInputState;
     private readonly Dictionary<ushort, AnalogIoState?> _analogOutputState;
     public IReadOnlyDictionary<ushort, AnalogIoState?> AnalogOutputState => _analogOutputState;
+    public IObservable<bool> IsConnected => _isConnected;
+    public bool IsCurrentlyConnected => _isConnected.Value;
 
 
     private Task StartReadLoop(CancellationToken ct)
@@ -198,6 +202,8 @@ public class PhoenixProxy : IPhoenixProxy, IDisposable
 
                     if (_phoenix == null || !await _phoenix.IsConnectedAsync(ct))
                     {
+                        if (_isConnected.Value)
+                            _isConnected.OnNext(false);
                         await _deviceLock.WaitAsync(ct);
 
                         try
@@ -212,26 +218,30 @@ public class PhoenixProxy : IPhoenixProxy, IDisposable
                             _deviceLock.Release();
                         }
                     }
+                    else
+                    {
+                        if (!_isConnected.Value)
+                            _isConnected.OnNext(true);
+                        var dInputs = await _phoenix.ReadDigitalInputsAsync(_digitalInputs, ct);
 
-                    var dInputs = await _phoenix.ReadDigitalInputsAsync(_digitalInputs, ct);
+                        foreach (var kvp in dInputs)
+                            _digitalInputState[kvp.Key] = new DigitalIoState(kvp.Value, DateTime.UtcNow);
 
-                    foreach (var kvp in dInputs)
-                        _digitalInputState[kvp.Key] = new DigitalIoState(kvp.Value, DateTime.UtcNow);
+                        var dOutputs = await _phoenix.ReadDigitalOutputsAsync(_digitalOutputs, ct);
 
-                    var dOutputs = await _phoenix.ReadDigitalOutputsAsync(_digitalOutputs, ct);
+                        foreach (var kvp in dOutputs)
+                            _digitalOutputState[kvp.Key] = new DigitalIoState(kvp.Value, DateTime.UtcNow);
 
-                    foreach (var kvp in dOutputs)
-                        _digitalOutputState[kvp.Key] = new DigitalIoState(kvp.Value, DateTime.UtcNow);
+                        var aInputs = await _phoenix.ReadAnalogInputsAsync(_analogInputs, ct);
 
-                    var aInputs = await _phoenix.ReadAnalogInputsAsync(_analogInputs, ct);
+                        foreach (var kvp in aInputs)
+                            _analogInputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
 
-                    foreach (var kvp in aInputs)
-                        _analogInputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
+                        var aOutputs = await _phoenix.ReadAnalogOutputsAsync(_analogOutputs, ct);
 
-                    var aOutputs = await _phoenix.ReadAnalogOutputsAsync(_analogOutputs, ct);
-
-                    foreach (var kvp in aOutputs)
-                        _analogOutputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
+                        foreach (var kvp in aOutputs)
+                            _analogOutputState[kvp.Key] = new AnalogIoState(kvp.Value, DateTime.UtcNow);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -293,6 +303,7 @@ public class PhoenixProxy : IPhoenixProxy, IDisposable
         Dispose(true);
         // Suppress finalization.
         GC.SuppressFinalize(this);
+        _isConnected.OnCompleted();
     }
 
     #endregion

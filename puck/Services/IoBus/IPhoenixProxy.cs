@@ -13,5 +13,7 @@ namespace puck.Services.IoBus
         IReadOnlyDictionary<ushort, AnalogIoState?> AnalogOutputState { get; }
         Task SetDigitalOutputStateAsync(ushort index, bool state, CancellationToken ct);
         Task SetAnalogOutputStateAsync(ushort index, double state, CancellationToken ct);
+        IObservable<bool> IsConnected { get; }
+        bool IsCurrentlyConnected { get; }
     }
 } 

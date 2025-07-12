@@ -39,8 +39,6 @@ namespace Puck.Models
         public double? PID_N { get; set; }
         public double? PID_OutputUpperLimit { get; set; }
         public double? PID_OutputLowerLimit { get; set; }
-        public double? PID_LastOutput { get; set; }
-        public double? PID_LastError { get; set; }
 
         // Timestamp
         public DateTime StateTimestampUtc { get; set; }
@@ -71,8 +69,6 @@ namespace Puck.Models
             double? pid_N,
             double? pid_OutputUpperLimit,
             double? pid_OutputLowerLimit,
-            double? pid_LastOutput,
-            double? pid_LastError,
             DateTime stateTimestampUtc,
             string? generalStatusMessage = null
         )
@@ -99,8 +95,6 @@ namespace Puck.Models
             PID_N = pid_N;
             PID_OutputUpperLimit = pid_OutputUpperLimit;
             PID_OutputLowerLimit = pid_OutputLowerLimit;
-            PID_LastOutput = pid_LastOutput;
-            PID_LastError = pid_LastError;
             StateTimestampUtc = stateTimestampUtc;
             GeneralStatusMessage = generalStatusMessage;
         }
