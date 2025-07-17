@@ -13,7 +13,7 @@ namespace Puck.Tests
         {
             var mock = new MockTemperatureController();
             await mock.SetSetPointAsync(150);
-            var setValue = mock.GetSetValue();
+            var setValue = await mock.GetSetValueAsync();
             Assert.Equal(150, setValue);
         }
 
@@ -22,7 +22,7 @@ namespace Puck.Tests
         {
             var mock = new MockTemperatureController();
             await mock.SetSetPointAsync(123);
-            var pv = mock.GetProcessValue();
+            var pv = await mock.GetProcessValueAsync();
             Assert.Equal(123, pv);
         }
 
@@ -31,7 +31,7 @@ namespace Puck.Tests
         {
             var mock = new MockTemperatureController();
             await mock.ApplySetPointSynchronouslyAsync(200, 0.1, TimeSpan.FromSeconds(1));
-            Assert.Equal(200, mock.GetProcessValue());
+            Assert.Equal(200, await mock.GetProcessValueAsync());
         }
 
         [Fact]

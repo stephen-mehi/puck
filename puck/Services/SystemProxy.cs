@@ -8,6 +8,8 @@ using System.Text;
 using Puck.Models;
 using System.Reactive.Subjects;
 using System.Reactive.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Puck.Services
 {
@@ -91,7 +93,6 @@ namespace Puck.Services
         double OutputUpper, double OutputLower
     ) : SystemStateDelta;
     public record PressureChanged(double? NewValue) : SystemStateDelta;
-    public record RunStarted(DateTime StartTimeUtc) : SystemStateDelta;
     public record ExtractionWeightChanged(double? Weight) : SystemStateDelta;
     // Add more as needed
 
@@ -251,50 +252,48 @@ namespace Puck.Services
             {
                 ValveStateChanged(var valve, var newState) => valve switch
                 {
-                    ValveType.GroupHead => oldState with { GroupHeadValveState = newState, StateTimestampUtc = now },
-                    ValveType.Backflush => oldState with { BackflushValveState = newState, StateTimestampUtc = now },
-                    ValveType.Recirculation => oldState with { RecirculationValveState = newState, StateTimestampUtc = now },
+                    ValveType.GroupHead => oldState with { GroupHeadValveState = newState, StateTimestampUtc = now, GeneralStatusMessage = $"GroupHead valve set to {newState}" },
+                    ValveType.Backflush => oldState with { BackflushValveState = newState, StateTimestampUtc = now, GeneralStatusMessage = $"Backflush valve set to {newState}" },
+                    ValveType.Recirculation => oldState with { RecirculationValveState = newState, StateTimestampUtc = now, GeneralStatusMessage = $"Recirculation valve set to {newState}" },
                     _ => oldState
                 },
                 TemperatureChanged(var controller, var newValue) => controller switch
                 {
-                    TemperatureControllerId.GroupHead => oldState with { GroupHeadTemperature = newValue, StateTimestampUtc = now },
-                    TemperatureControllerId.ThermoBlock => oldState with { ThermoblockTemperature = newValue, StateTimestampUtc = now },
+                    TemperatureControllerId.GroupHead => oldState with { GroupHeadTemperature = newValue, StateTimestampUtc = now, GeneralStatusMessage = $"GroupHead temperature updated to {newValue}" },
+                    TemperatureControllerId.ThermoBlock => oldState with { ThermoblockTemperature = newValue, StateTimestampUtc = now, GeneralStatusMessage = $"Thermoblock temperature updated to {newValue}" },
                     _ => oldState
                 },
-                PumpSpeedChanged(var newValue) => oldState with { PumpSpeed = newValue, StateTimestampUtc = now },
-                PausedChanged(var isPaused) => oldState with { IsPaused = isPaused, StateTimestampUtc = now },
-                RunStateChanged(var newState) => oldState with { RunState = newState, StateTimestampUtc = now },
+                PumpSpeedChanged(var newValue) => oldState with { PumpSpeed = newValue, StateTimestampUtc = now, GeneralStatusMessage = $"Pump speed set to {newValue}" },
+                PausedChanged(var isPaused) => oldState with { IsPaused = isPaused, StateTimestampUtc = now, GeneralStatusMessage = isPaused ? "System paused" : "System unpaused" },
+                RunStateChanged(var newState) => oldState with { RunState = newState, StateTimestampUtc = now, GeneralStatusMessage = $"Run state changed to {newState}" },
                 TemperatureSetpointChanged(var controller, var newSetpoint) => controller switch
                 {
-                    TemperatureControllerId.GroupHead => oldState with { GroupHeadSetpoint = newSetpoint, StateTimestampUtc = now },
-                    TemperatureControllerId.ThermoBlock => oldState with { ThermoblockSetpoint = newSetpoint, StateTimestampUtc = now },
+                    TemperatureControllerId.GroupHead => oldState with { GroupHeadSetpoint = newSetpoint, StateTimestampUtc = now, GeneralStatusMessage = $"GroupHead setpoint set to {newSetpoint}" },
+                    TemperatureControllerId.ThermoBlock => oldState with { ThermoblockSetpoint = newSetpoint, StateTimestampUtc = now, GeneralStatusMessage = $"Thermoblock setpoint set to {newSetpoint}" },
                     _ => oldState
                 },
                 StatusMessageChanged(var msg) => oldState with { GeneralStatusMessage = msg, StateTimestampUtc = now },
-                ConnectionChanged(var isConnected) => oldState with { IsIoBusConnected = isConnected, StateTimestampUtc = now },
+                ConnectionChanged(var isConnected) => oldState with { IsIoBusConnected = isConnected, StateTimestampUtc = now, GeneralStatusMessage = $"PhoenixProxy connection {(isConnected ? "established" : "lost")}" },
                 PidParametersChanged(var kp, var ki, var kd, var n, var outU, var outL)
-                    => oldState with {
-                        PID_Kp = kp, 
+                    => oldState with
+                    {
+                        PID_Kp = kp,
                         PID_Ki = ki,
                         PID_Kd = kd,
                         PID_N = n,
                         PID_OutputUpperLimit = outU,
                         PID_OutputLowerLimit = outL,
-                        StateTimestampUtc = now
+                        StateTimestampUtc = now,
+                        GeneralStatusMessage = $"PID parameters updated: Kp={kp} Ki={ki} Kd={kd} N={n} OutU={outU} OutL={outL}"
                     },
-                PressureChanged(var newValue) => oldState with { GroupHeadPressure = newValue, StateTimestampUtc = now },
-                RunStarted(var startTime) => oldState with { RunStartTimeUtc = startTime, StateTimestampUtc = now },
-                ExtractionWeightChanged(var weight) => oldState with { ExtractionWeight = weight, StateTimestampUtc = now },
+                PressureChanged(var newValue) => oldState with { GroupHeadPressure = newValue, StateTimestampUtc = now, GeneralStatusMessage = $"GroupHead pressure updated to {newValue}" },
+                ExtractionWeightChanged(var weight) => oldState with { ExtractionWeight = weight, StateTimestampUtc = now, GeneralStatusMessage = $"Extraction weight updated to {weight}" },
                 _ => oldState
             };
         }
 
         public async Task StartRunScan(CancellationToken ct)
         {
-            // Log the start of the scan
-            _logger.LogInformation("Started run scan");
-
             // Ensure only one scan can run at a time by acquiring the run scan lock (non-blocking)
             if (!await _runScanLock.WaitAsync(0))
                 throw new Exception("Cannot start run scan if already started");
@@ -308,8 +307,6 @@ namespace Puck.Services
             // Main scan task: handles the espresso run logic
             var scanTask = Task.Run(async () =>
             {
-                _logger.LogInformation("Entered run scan task");
-
                 RunResult currentRes;
 
                 // Before entering the main scan loop, declare:
@@ -368,53 +365,50 @@ namespace Puck.Services
 
                             try
                             {
-                                _logger.LogInformation("Run starting");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged("Run starting"));
                                 // Emit PID parameters at start
                                 _stateDeltaSubject.OnNext(new PidParametersChanged(
-                                    _pid.Kp, 
+                                    _pid.Kp,
                                     _pid.Ki,
                                     _pid.Kd,
                                     _pid.N,
-                                    _pid.OutputUpperLimit, 
+                                    _pid.OutputUpperLimit,
                                     _pid.OutputLowerLimit
                                 ));
 
                                 // --- Espresso control logic begins ---
 
-                                // Mark run start time in state
-                                _stateDeltaSubject.OnNext(new RunStarted(starttime));
-
                                 // Close backflush valve
-                                _logger.LogInformation("Closing backflush valve");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged("Closing backflush valve"));
                                 await SetBackFlushValveStateClosedInternalAsync(allCtSrc.Token);
 
                                 // Close grouphead valve
-                                _logger.LogInformation("Closing grouphead valve");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged("Closing grouphead valve"));
                                 await SetGroupHeadValveStateClosedInternalAsync(allCtSrc.Token);
 
                                 // Open recirculation valve
-                                _logger.LogInformation("Opening recirc valve");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged("Opening recirc valve"));
                                 await SetRecirculationValveStateOpenInternalAsync(allCtSrc.Token);
                                 await Task.Delay(_recircValveOpenDelayMs, allCtSrc.Token);
 
                                 // Set initial pump speed
-                                _logger.LogInformation($"Setting initial pump speed to: {runParams.InitialPumpSpeed}");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged($"Setting initial pump speed to: {runParams.InitialPumpSpeed}"));
                                 await ApplyPumpSpeedInternalAsync(runParams.InitialPumpSpeed, allCtSrc.Token);
                                 await Task.Delay(TimeSpan.FromMilliseconds(_initialPumpSpeedDelayMs), allCtSrc.Token);
 
                                 // Set heater enabled and wait for temperature
-                                _logger.LogInformation($"Setting temp to: {runParams.GroupHeadTemperatureFarenheit}");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged($"Setting temp to: {runParams.GroupHeadTemperatureFarenheit}"));
-                                await SetTemperatureAndEmitStateAsync(TemperatureControllerId.GroupHead, runParams.GroupHeadTemperatureFarenheit, allCtSrc.Token);
+                                var groupHeadHeatUpTask = 
+                                    SetTemperatureSynchronouslyAsync(
+                                        TemperatureControllerId.GroupHead, 
+                                        runParams.GroupHeadTemperatureFarenheit, 
+                                        TimeSpan.FromSeconds(_tempSettleTimeoutSec),
+                                        2.0,
+                                        allCtSrc.Token);
 
-                                _logger.LogInformation($"Setting temp to: {runParams.ThermoblockTemperatureFarenheit}");
-                                _stateDeltaSubject.OnNext(new StatusMessageChanged($"Setting temp to: {runParams.ThermoblockTemperatureFarenheit}"));
-                                await SetTemperatureAndEmitStateAsync(TemperatureControllerId.ThermoBlock, runParams.ThermoblockTemperatureFarenheit, allCtSrc.Token);
+                                var thermoblockHeatUp = 
+                                    SetTemperatureSynchronouslyAsync(
+                                        TemperatureControllerId.ThermoBlock, 
+                                        runParams.ThermoblockTemperatureFarenheit,
+                                        TimeSpan.FromSeconds(_tempSettleTimeoutSec),
+                                        2.0,
+                                        allCtSrc.Token);
+
+                                await Task.WhenAll(groupHeadHeatUpTask, thermoblockHeatUp);
 
                                 // Tare scale (TODO)
                                 // Open grouphead valve
@@ -455,8 +449,8 @@ namespace Puck.Services
                                         throw new Exception(msg);
                                     }
 
-                                    var groupTempLoop = _tempProxy[TemperatureControllerId.GroupHead].GetProcessValue();
-                                    var thermoblockTempLoop = _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValue();
+                                    var groupTempLoop = await _tempProxy[TemperatureControllerId.GroupHead].GetProcessValueAsync(allCtSrc.Token);
+                                    var thermoblockTempLoop = await _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValueAsync(allCtSrc.Token);
                                     _stateDeltaSubject.OnNext(new TemperatureChanged(TemperatureControllerId.GroupHead, groupTempLoop));
                                     _stateDeltaSubject.OnNext(new TemperatureChanged(TemperatureControllerId.ThermoBlock, thermoblockTempLoop));
 
@@ -464,8 +458,6 @@ namespace Puck.Services
                                     await Task.Delay(TimeSpan.FromMilliseconds(_pidLoopDelayMs), allCtSrc.Token);
                                     var output = _pid.PID_iterate(runParams.TargetPressureBar, pressure.Value, DateTime.UtcNow - startTime);
                                     await ApplyPumpSpeedInternalAsync(output, allCtSrc.Token);
-
-                                    _stateDeltaSubject.OnNext(new StatusMessageChanged("Loop event in extraction routine"));
                                 }
 
                                 currentRes.CompletionStatus = RunCompletionStatus.SUCCEEDED;
@@ -510,7 +502,6 @@ namespace Puck.Services
                                 // Release locks (note: if not acquired, this will throw)
                                 _runLock.Release();
                                 _systemLock.Release();
-                                _logger.LogInformation("Run finished");
                             }
                         }
                     }
@@ -685,18 +676,19 @@ namespace Puck.Services
         }
 
 
-        public double? GetProcessTemperature(TemperatureControllerId controllerId)
+        public Task<double> GetProcessTemperatureAsync(
+            TemperatureControllerId controllerId,
+            CancellationToken ct)
         {
-            var temp = _tempProxy[controllerId].GetProcessValue();
+            return _tempProxy[controllerId].GetProcessValueAsync(ct);
 
-            return temp;
         }
 
-        public double? GetSetPointTemperature(TemperatureControllerId controllerId)
+        public Task<double> GetSetPointTemperatureAsync(
+            TemperatureControllerId controllerId,
+            CancellationToken ct)
         {
-            var temp = _tempProxy[controllerId].GetSetValue();
-
-            return temp;
+            return _tempProxy[controllerId].GetSetValueAsync(ct);
         }
 
         private async Task ExecuteSystemActionAsync(
@@ -871,11 +863,11 @@ namespace Puck.Services
             return ExecuteSystemActionAsync(() => SetAllIdleInternalAsync(ct), ct);
         }
 
-        public SystemState GetSystemState()
+        public async Task<SystemState> GetSystemStateAsync()
         {
             // Gather temperature controller states
-            double? groupHeadTemp = _tempProxy[TemperatureControllerId.GroupHead]?.GetProcessValue();
-            double? thermoblockTemp = _tempProxy[TemperatureControllerId.ThermoBlock]?.GetProcessValue();
+            double groupHeadTemp = await _tempProxy[TemperatureControllerId.GroupHead].GetProcessValueAsync(CancellationToken.None);
+            double thermoblockTemp = await  _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValueAsync(CancellationToken.None);
             // For heater enabled, you may need to add a method/property to your controller or proxy
             bool groupHeadHeaterEnabled = false; // Placeholder
             bool thermoblockHeaterEnabled = false; // Placeholder
@@ -920,12 +912,44 @@ namespace Puck.Services
         }
 
         // Wrapper to set temperature and emit state changes
-        private async Task SetTemperatureAndEmitStateAsync(TemperatureControllerId controllerId, int setpoint, CancellationToken ct)
+        private async Task SetTemperatureSynchronouslyAsync(
+            TemperatureControllerId controllerId, 
+            int setpoint, 
+            TimeSpan timeout,
+            double tolerance,
+            CancellationToken ct)
         {
-            await _tempProxy[controllerId].ApplySetPointSynchronouslyAsync(setpoint, _tempSettleTolerance, TimeSpan.FromSeconds(_tempSettleTimeoutSec), ct);
-            _stateDeltaSubject.OnNext(new TemperatureSetpointChanged(controllerId, setpoint));
-            var temp = _tempProxy[controllerId].GetProcessValue();
-            _stateDeltaSubject.OnNext(new TemperatureChanged(controllerId, temp));
+            var startTime = DateTime.UtcNow;
+
+            try
+            {
+
+                await _tempProxy[controllerId].SetSetPointAsync(setpoint, ct);
+                await _tempProxy[controllerId].EnableControlLoopAsync(ct);
+
+                _stateDeltaSubject.OnNext(new TemperatureSetpointChanged(controllerId, setpoint));
+
+                while (true)
+                {
+                    if (DateTime.UtcNow - startTime > timeout)
+                        throw new TimeoutException($"Failed to get to specified temperature: {setpoint} after specified seconds: {timeout.TotalSeconds}");
+
+                    var procValue = await _tempProxy[controllerId].GetProcessValueAsync(ct);
+
+                    _stateDeltaSubject.OnNext(new TemperatureChanged(controllerId, procValue));
+
+                    if (Math.Abs(setpoint - procValue) < tolerance)
+                        break;
+
+                    await Task.Delay(100, ct);
+                }
+            }
+            catch (Exception)
+            {
+                await _tempProxy[controllerId].DisableControlLoopAsync(ct);
+                throw;
+            }
+
         }
 
         #region IDisposable

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Diagnostics;
 
 namespace Puck.Services.TemperatureController
 {
@@ -10,26 +11,31 @@ namespace Puck.Services.TemperatureController
     public class MockTemperatureController : ITemperatureController
     {
         private int _setValue = 100;
-        private int _processValue = 100;
+        private double _processValue = 100;
         private bool _controlLoopActive = false;
         private bool _disposed = false;
         private TimeSpan _responseDelay = TimeSpan.FromMilliseconds(50);
+        private double _approachRate = 0.1; // fraction of difference per step
+        private int _approachIntervalMs = 100; // ms between steps
+        private CancellationTokenSource? _loopCts;
+        private readonly object _lock = new();
 
         // Test hook for simulating a stuck process value
         public bool SimulateStuckProcessValue { get; set; } = false;
 
         // For test configuration
-        public void SetProcessValue(int value) => _processValue = value;
-        public void SetSetValue(int value) => _setValue = value;
+        public void SetProcessValue(double value) { lock(_lock) { _processValue = value; } }
+        public void SetSetValue(double value) { lock(_lock) { _setValue = (int)value; } }
         public void SetResponseDelay(TimeSpan delay) => _responseDelay = delay;
         public void SetControlLoopActive(bool active) => _controlLoopActive = active;
+        public void SetApproachRate(double rate) => _approachRate = rate;
+        public void SetApproachIntervalMs(int ms) => _approachIntervalMs = ms;
 
         public async Task SetSetPointAsync(int setpoint, CancellationToken ct = default)
         {
             await Task.Delay(_responseDelay, ct);
-            _setValue = setpoint;
-            if (!SimulateStuckProcessValue)
-                _processValue = setpoint; // Simulate instant process value change
+            lock(_lock) { _setValue = setpoint; }
+            // Do not instantly change process value; let the control loop handle it
         }
 
         public async Task ApplySetPointSynchronouslyAsync(int tempSetPoint, double tolerance, TimeSpan timeout, CancellationToken ct = default)
@@ -37,26 +43,81 @@ namespace Puck.Services.TemperatureController
             await SetSetPointAsync(tempSetPoint, ct);
             _controlLoopActive = true;
             var start = DateTime.UtcNow;
-            while (Math.Abs(tempSetPoint - _processValue) > tolerance)
+            while (true)
             {
+                double pv;
+                lock(_lock) { pv = _processValue; }
+                if (Math.Abs(tempSetPoint - pv) <= tolerance)
+                    break;
                 if (DateTime.UtcNow - start > timeout)
                     throw new TimeoutException();
                 await Task.Delay(10, ct);
             }
         }
 
-        public double? GetSetValue() => _setValue;
-        public double? GetProcessValue() => _processValue;
 
         public Task DisableControlLoopAsync(CancellationToken ct = default)
         {
             _controlLoopActive = false;
+            _loopCts?.Cancel();
+            _loopCts = null;
             return Task.CompletedTask;
         }
 
         public void Dispose()
         {
             _disposed = true;
+            _loopCts?.Cancel();
+        }
+
+        public Task EnableControlLoopAsync(CancellationToken ct = default)
+        {
+            _controlLoopActive = true;
+            if (_loopCts == null || _loopCts.IsCancellationRequested)
+            {
+                _loopCts = new CancellationTokenSource();
+                var token = _loopCts.Token;
+                Task.Run(async () =>
+                {
+                    while (!_disposed && _controlLoopActive && !token.IsCancellationRequested)
+                    {
+                        if (SimulateStuckProcessValue)
+                        {
+                            await Task.Delay(_approachIntervalMs, token);
+                            continue;
+                        }
+                        double pv, sv;
+                        lock(_lock)
+                        {
+                            pv = _processValue;
+                            sv = _setValue;
+                        }
+                        var diff = sv - pv;
+                        if (Math.Abs(diff) > 0.01)
+                        {
+                            var step = diff * _approachRate;
+                            if (Math.Abs(step) < 0.01) step = Math.Sign(diff) * 0.01;
+                            lock(_lock) { _processValue += step; }
+                        }
+                        else
+                        {
+                            lock(_lock) { _processValue = sv; }
+                        }
+                        await Task.Delay(_approachIntervalMs, token);
+                    }
+                }, token);
+            }
+            return Task.CompletedTask;
+        }
+
+        public Task<double> GetSetValueAsync(CancellationToken ct = default)
+        {
+            lock(_lock) { return Task.FromResult((double)_setValue); }
+        }
+
+        public Task<double> GetProcessValueAsync(CancellationToken ct = default)
+        {
+            lock(_lock) { return Task.FromResult(_processValue); }
         }
     }
 }

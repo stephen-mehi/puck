@@ -8,8 +8,9 @@ namespace Puck.Services.TemperatureController
     {
         Task SetSetPointAsync(int setpoint, CancellationToken ct = default);
         Task ApplySetPointSynchronouslyAsync(int tempSetPoint, double tolerance, TimeSpan timeout, CancellationToken ct = default);
-        double? GetSetValue();
-        double? GetProcessValue();
+        Task<double> GetSetValueAsync(CancellationToken ct = default);
+        Task<double> GetProcessValueAsync(CancellationToken ct = default);
         Task DisableControlLoopAsync(CancellationToken ct = default);
+        Task EnableControlLoopAsync(CancellationToken ct = default);
     }
 }

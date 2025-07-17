@@ -1,5 +1,6 @@
 using Puck.Services;
 using Puck.Services.TemperatureController;
+using System.Threading.Tasks;
 
 namespace puck.Services.TemperatureController;
 
@@ -15,8 +16,6 @@ public class TemperatureControllerProxy : ITemperatureController
     private bool _isDisposed;
     private readonly ILogger<TemperatureControllerProxy> _logger;
 
-    private double? _processValue = null;
-    private double? _setValue = null;
     private readonly PauseContainer _pauseCont;
 
 
@@ -34,7 +33,7 @@ public class TemperatureControllerProxy : ITemperatureController
         _logger = logger;
 
         //"/dev/ttyUSB0"
-        
+
         var portConfig = new
             FujiPXFDriverPortConfiguration(
                 port,
@@ -42,7 +41,7 @@ public class TemperatureControllerProxy : ITemperatureController
 
         _connectAction = new Func<Task<FujiPXFDriver>>(async () =>
         {
-            return await new FujiPXFDriverProvider().ConnectAsync(portConfig);
+            return await _prov.ConnectAsync(portConfig);
         });
 
         _task = StartReadLoop(_ctSrc.Token);
@@ -57,13 +56,10 @@ public class TemperatureControllerProxy : ITemperatureController
                 try
                 {
                     await _pauseCont.WaitIfPausedAsync(ct);
-                    
+
                     if (_proxy == null || !await _proxy.IsConnectedAsync(ct))
                     {
                         await _lock.WaitAsync(ct);
-
-                        _processValue = null;
-                        _setValue = null;
 
                         try
                         {
@@ -75,26 +71,15 @@ public class TemperatureControllerProxy : ITemperatureController
                             _lock.Release();
                         }
                     }
-
-                    var procVal = await _proxy.GetProcessValueAsync(ct);
-                    var setVal = await _proxy.GetSetValueAsync(ct);
-
-                    await _lock.WaitAsync(ct);
-
-                    _processValue = procVal;
-                    _setValue = setVal;
-
-                    _lock.Release();
-
                 }
                 catch (Exception e)
                 {
                     _logger.LogError(e, $"Error within {nameof(TemperatureControllerProxy)} in {nameof(StartReadLoop)}: {e.Message}");
-                    await Task.Delay(5000, ct);
+                    await Task.Delay(1000, ct);
                 }
                 finally
                 {
-                    await Task.Delay(50, ct);
+                    await Task.Delay(100, ct);
                 }
             }
         });
@@ -138,6 +123,23 @@ public class TemperatureControllerProxy : ITemperatureController
         }
     }
 
+    public async Task EnableControlLoopAsync(CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+
+        try
+        {
+            if (_proxy == null)
+                throw new Exception("System proxy was null");
+
+            await _proxy.EnableControlLoopAsync(ct);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     public async Task ApplySetPointSynchronouslyAsync(
             int tempSetPoint,
             double tolerance,
@@ -161,13 +163,7 @@ public class TemperatureControllerProxy : ITemperatureController
                 if (DateTime.UtcNow - startTime > timeout)
                     throw new TimeoutException($"Failed to get to specified temperature: {tempSetPoint} after specified seconds: {timeout.TotalSeconds}");
 
-                if (!_processValue.HasValue)
-                {
-                    await Task.Delay(100, ct);
-                    continue;
-                }
-
-                if (Math.Abs(tempSetPoint - _processValue.Value) < tolerance)
+                if (Math.Abs(tempSetPoint - (await GetProcessValueAsync(ct))) < tolerance)
                     break;
 
                 await Task.Delay(100, ct);
@@ -184,8 +180,38 @@ public class TemperatureControllerProxy : ITemperatureController
         }
     }
 
-    public double? GetSetValue() => _setValue;
-    public double? GetProcessValue() => _processValue;
+    public async Task<double> GetSetValueAsync(CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+
+        try
+        {
+            if (_proxy == null)
+                throw new Exception("System proxy was null");
+
+            return await _proxy.GetSetValueAsync(ct);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+    public async Task<double> GetProcessValueAsync(CancellationToken ct)
+    {
+        await _lock.WaitAsync(ct);
+
+        try
+        {
+            if (_proxy == null)
+                throw new Exception("System proxy was null");
+
+            return await _proxy.GetProcessValueAsync(ct);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
 
 
     #region IDisposable

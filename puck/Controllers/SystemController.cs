@@ -32,14 +32,14 @@ public class SystemController : ControllerBase
 
     [HttpGet]
     [Route("state")]
-    public IActionResult GetIoStateAsync(CancellationToken ct = default)
+    public async Task<IActionResult> GetIoStateAsync(CancellationToken ct = default)
     {
         var state = new
         {
-            ThermoBlockTemperature = _proxy.GetProcessTemperature(TemperatureControllerId.ThermoBlock),
-            GroupHeadTemperature = _proxy.GetProcessTemperature(TemperatureControllerId.GroupHead),
-            ThermoBlockTemperatureSetPoint = _proxy.GetSetPointTemperature(TemperatureControllerId.ThermoBlock),
-            GroupHeadTemperatureSetPoint = _proxy.GetSetPointTemperature(TemperatureControllerId.GroupHead),
+            ThermoBlockTemperature = await _proxy.GetProcessTemperatureAsync(TemperatureControllerId.ThermoBlock, ct),
+            GroupHeadTemperature = await _proxy.GetProcessTemperatureAsync(TemperatureControllerId.GroupHead, ct),
+            ThermoBlockTemperatureSetPoint = await _proxy.GetSetPointTemperatureAsync(TemperatureControllerId.ThermoBlock, ct),
+            GroupHeadTemperatureSetPoint = await _proxy.GetSetPointTemperatureAsync(TemperatureControllerId.GroupHead, ct),
             Pressure = _proxy.GetGroupHeadPressure(),
             PumpSpeed = _proxy.GetPumpSpeedSetting(),
             RunState = _proxy.GetRunState().ToString(),

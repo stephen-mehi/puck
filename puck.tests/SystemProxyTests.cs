@@ -4,7 +4,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Moq;
 using puck.Services.IoBus;
 using puck.Services.PID;
 using puck.Services.TemperatureController;
@@ -23,22 +22,16 @@ namespace Puck.Tests
         public SystemProxyTests(ITestOutputHelper output) => _output = output;
         private SystemProxy CreateSystemProxy(
             out MockPhoenixProxy phoenixMock,
-            out Dictionary<TemperatureControllerId, Mock<ITemperatureController>> tempMocks,
+            out Dictionary<TemperatureControllerId, MockTemperatureController> tempMocks,
             out PauseContainer pauseContainer)
         {
             phoenixMock = new MockPhoenixProxy();
-            tempMocks = new Dictionary<TemperatureControllerId, Mock<ITemperatureController>>
+            tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
             {
-                { TemperatureControllerId.GroupHead, new Mock<ITemperatureController>() },
-                { TemperatureControllerId.ThermoBlock, new Mock<ITemperatureController>() }
+                { TemperatureControllerId.GroupHead, new MockTemperatureController() },
+                { TemperatureControllerId.ThermoBlock, new MockTemperatureController() }
             };
-            // Use a local dictionary for the container
-            var portMap = new Dictionary<TemperatureControllerId, string> {
-                { TemperatureControllerId.GroupHead, "COM1" },
-                { TemperatureControllerId.ThermoBlock, "COM2" }
-            };
-            var tempConfig = new TemperatureControllerConfiguration();
-            var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => x.Value.Object));
+            var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
 
             pauseContainer = new PauseContainer();
             var logger = new LoggerFactory().CreateLogger<SystemService>();
@@ -87,7 +80,7 @@ namespace Puck.Tests
         public async Task SetTemperatureSetpointAsync_IsThreadSafe()
         {
             var proxy = CreateSystemProxy(out _, out var tempMocks, out _);
-            tempMocks[TemperatureControllerId.GroupHead].Setup(t => t.SetSetPointAsync(It.IsAny<int>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            // No setup needed for MockTemperatureController; it implements the interface
             var cts = new CancellationTokenSource();
             var tasks = Enumerable.Range(0, 10)
                 .Select(_ => Task.Run(() => proxy.SetTemperatureSetpointAsync(100, TemperatureControllerId.GroupHead, cts.Token)))
@@ -172,19 +165,19 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void GetProcessTemperature_ReturnsExpectedValue()
+        public async Task GetProcessTemperature_ReturnsExpectedValue()
         {
             var proxy = CreateSystemProxy(out _, out var tempMocks, out _);
-            tempMocks[TemperatureControllerId.GroupHead].Setup(t => t.GetProcessValue()).Returns(88.8);
-            Assert.Equal(88.8, proxy.GetProcessTemperature(TemperatureControllerId.GroupHead));
+            tempMocks[TemperatureControllerId.GroupHead].SetProcessValue(88);
+            Assert.Equal(88, await proxy.GetProcessTemperatureAsync(TemperatureControllerId.GroupHead, CancellationToken.None));
         }
 
         [Fact]
-        public void GetSetPointTemperature_ReturnsExpectedValue()
+        public async Task GetSetPointTemperature_ReturnsExpectedValue()
         {
             var proxy = CreateSystemProxy(out _, out var tempMocks, out _);
-            tempMocks[TemperatureControllerId.GroupHead].Setup(t => t.GetSetValue()).Returns(92.2);
-            Assert.Equal(92.2, proxy.GetSetPointTemperature(TemperatureControllerId.GroupHead));
+            tempMocks[TemperatureControllerId.GroupHead].SetSetValue(92);
+            Assert.Equal(92, await proxy.GetSetPointTemperatureAsync(TemperatureControllerId.GroupHead, CancellationToken.None));
         }
 
         [Fact]
@@ -194,12 +187,12 @@ namespace Puck.Tests
             // Remove all digital inputs
             phoenixMock = new MockPhoenixProxy(digitalInputs: Array.Empty<ushort>());
             var logger = new LoggerFactory().CreateLogger<SystemService>();
-            var tempMocks = new Dictionary<TemperatureControllerId, Mock<ITemperatureController>>
+            var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
             {
-                { TemperatureControllerId.GroupHead, new Mock<ITemperatureController>() },
-                { TemperatureControllerId.ThermoBlock, new Mock<ITemperatureController>() }
+                { TemperatureControllerId.GroupHead, new MockTemperatureController() },
+                { TemperatureControllerId.ThermoBlock, new MockTemperatureController() }
             };
-            var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => x.Value.Object));
+            var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var pauseContainer = new PauseContainer();
             var pid = new PID(1, 1, 1, 1, 1, 1);
             var paramRepo = new RunParametersRepo();
@@ -209,7 +202,7 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void GetSystemState_ReturnsExpectedState_NormalOperation()
+        public async Task GetSystemState_ReturnsExpectedState_NormalOperation()
         {
             // Arrange
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
@@ -227,11 +220,11 @@ namespace Puck.Tests
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
-            var logger = new Mock<ILogger<SystemService>>().Object;
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
 
             // Simulate valve and run state if needed
-            var state = proxy.GetSystemState();
+            var state = await proxy.GetSystemStateAsync();
 
             // Assert
             Assert.Equal(93, state.GroupHeadTemperature);
@@ -243,7 +236,7 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void GetSystemState_ReturnsExpectedState_WhenPaused()
+        public async Task GetSystemState_ReturnsExpectedState_WhenPaused()
         {
             // Arrange
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
@@ -259,18 +252,18 @@ namespace Puck.Tests
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
-            var logger = new Mock<ILogger<SystemService>>().Object;
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
 
             // Act
-            var state = proxy.GetSystemState();
+            var state = await proxy.GetSystemStateAsync();
 
             // Assert
             Assert.True(state.IsPaused);
         }
 
         [Fact]
-        public void GetSystemState_ReturnsExpectedState_NullTempControllers()
+        public async Task GetSystemState_ReturnsExpectedState_NullTempControllers()
         {
             // Arrange
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
@@ -288,11 +281,11 @@ namespace Puck.Tests
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
-            var logger = new Mock<ILogger<SystemService>>().Object;
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
 
             // Act
-            var state = proxy.GetSystemState();
+            var state = await proxy.GetSystemStateAsync();
 
             // Assert
             Assert.Equal(0, state.GroupHeadTemperature);
@@ -300,7 +293,7 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void GetSystemState_ReturnsExpectedState_ValveStates()
+        public async Task GetSystemState_ReturnsExpectedState_ValveStates()
         {
             // Arrange
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
@@ -322,11 +315,11 @@ namespace Puck.Tests
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
-            var logger = new Mock<ILogger<SystemService>>().Object;
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
 
             // Act
-            var state = proxy.GetSystemState();
+            var state =  await proxy.GetSystemStateAsync();
 
             // Assert
             Assert.True(Enum.IsDefined(typeof(ValveState), state.GroupHeadValveState));
@@ -335,7 +328,7 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void GetSystemState_ReturnsExpectedState_RunState()
+        public async Task GetSystemState_ReturnsExpectedState_RunState()
         {
             // Arrange
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
@@ -355,11 +348,11 @@ namespace Puck.Tests
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
-            var logger = new Mock<ILogger<SystemService>>().Object;
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
 
             // Act
-            var state = proxy.GetSystemState();
+            var state = await proxy.GetSystemStateAsync();
 
             // Assert
             Assert.True(Enum.IsDefined(typeof(RunState), state.RunState));
@@ -396,7 +389,7 @@ namespace Puck.Tests
             var pid = new PID(1, 1, 1, 1, 1, 1);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
-            var logger = new Mock<ILogger<SystemService>>().Object;
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
                 logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
                 recircValveIO, groupheadValveIO, backflushValveIO, runStatusOutputIO, runStatusInputIO, pumpSpeedIO, pressureIO
@@ -474,9 +467,9 @@ namespace Puck.Tests
                 sb.AppendLine(string.Join(",", props.Select(p => FormatCsvValue(p.GetValue(s)))));
             }
             // Write to file in test output directory
-            var fileName = $"ProcessDeviceStates_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
-            var filePath = System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), fileName);
-            System.IO.File.WriteAllText(filePath, sb.ToString());
+            var fileName = $"ProcessDeviceStates.csv";
+            var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
+            File.WriteAllText(filePath, sb.ToString());
             return filePath;
         }
         private static string FormatCsvValue(object? value)
