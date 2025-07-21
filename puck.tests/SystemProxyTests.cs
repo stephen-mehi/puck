@@ -402,7 +402,7 @@ namespace Puck.Tests
                 GroupHeadTemperatureFarenheit = 200,
                 ThermoblockTemperatureFarenheit = 210,
                 PreExtractionTargetTemperatureFarenheit = 200,
-                ExtractionWeightGrams = .5,
+                ExtractionWeightGrams = 10,
                 MaxExtractionSeconds = 30,
                 TargetPressureBar = 9.0
             };

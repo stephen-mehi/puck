@@ -128,7 +128,6 @@ namespace Puck.Services
         private readonly int _initialPumpSpeedDelayMs;
         private readonly int _tempSettleTolerance;
         private readonly int _tempSettleTimeoutSec;
-        private readonly double _extractionWeightIncrement;
         private readonly int _pidLoopDelayMs;
         private readonly int _mainScanLoopDelayMs;
         private readonly int _runStateMonitorDelayMs;
@@ -160,11 +159,10 @@ namespace Puck.Services
             int initialPumpSpeedDelayMs = 750,
             int tempSettleTolerance = 2,
             int tempSettleTimeoutSec = 30,
-            double extractionWeightIncrement = 10,
             int pidLoopDelayMs = 500,
             int mainScanLoopDelayMs = 250,
             int runStateMonitorDelayMs = 250,
-            double pumpStopValue = 4,
+            double pumpStopValue = 0,
             int setAllIdleRecircOpenDelayMs = 250
         )
         {
@@ -192,7 +190,6 @@ namespace Puck.Services
             _initialPumpSpeedDelayMs = initialPumpSpeedDelayMs;
             _tempSettleTolerance = tempSettleTolerance;
             _tempSettleTimeoutSec = tempSettleTimeoutSec;
-            _extractionWeightIncrement = extractionWeightIncrement;
             _pidLoopDelayMs = pidLoopDelayMs;
             _mainScanLoopDelayMs = mainScanLoopDelayMs;
             _runStateMonitorDelayMs = runStateMonitorDelayMs;
@@ -269,7 +266,7 @@ namespace Puck.Services
                 TemperatureSetpointChanged(var controller, var newSetpoint) => controller switch
                 {
                     TemperatureControllerId.GroupHead => oldState with { GroupHeadSetpoint = newSetpoint, StateTimestampUtc = now, GeneralStatusMessage = $"GroupHead setpoint set to {newSetpoint}" },
-                    TemperatureControllerId.ThermoBlock => oldState with { ThermoblockSetpoint = newSetpoint, StateTimestampUtc = now, GeneralStatusMessage = $"Thermoblock setpoint set to {newSetpoint}" },
+                    TemperatureControllerId.ThermoBlock => oldState with { ThermoblockSetpoint = newSetpoint, StateTimestampUtc = now, GeneralStatusMessage = $"WRITE: Thermoblock setpoint set to {newSetpoint}" },
                     _ => oldState
                 },
                 StatusMessageChanged(var msg) => oldState with { GeneralStatusMessage = msg, StateTimestampUtc = now },
@@ -392,17 +389,17 @@ namespace Puck.Services
                                 await Task.Delay(TimeSpan.FromMilliseconds(_initialPumpSpeedDelayMs), allCtSrc.Token);
 
                                 // Set heater enabled and wait for temperature
-                                var groupHeadHeatUpTask = 
+                                var groupHeadHeatUpTask =
                                     SetTemperatureSynchronouslyAsync(
-                                        TemperatureControllerId.GroupHead, 
-                                        runParams.GroupHeadTemperatureFarenheit, 
+                                        TemperatureControllerId.GroupHead,
+                                        runParams.GroupHeadTemperatureFarenheit,
                                         TimeSpan.FromSeconds(_tempSettleTimeoutSec),
                                         2.0,
                                         allCtSrc.Token);
 
-                                var thermoblockHeatUp = 
+                                var thermoblockHeatUp =
                                     SetTemperatureSynchronouslyAsync(
-                                        TemperatureControllerId.ThermoBlock, 
+                                        TemperatureControllerId.ThermoBlock,
                                         runParams.ThermoblockTemperatureFarenheit,
                                         TimeSpan.FromSeconds(_tempSettleTimeoutSec),
                                         2.0,
@@ -418,7 +415,7 @@ namespace Puck.Services
                                 // Start PID pressure loop
 
                                 double weight = 0;
-                                DateTime startTime = DateTime.UtcNow;
+                                DateTime prevTime = DateTime.UtcNow;
 
                                 // Extraction loop: runs until target weight or timeout
                                 while (weight < runParams.ExtractionWeightGrams)
@@ -426,7 +423,7 @@ namespace Puck.Services
                                     // (Consider adding pause check here for better responsiveness)
 
                                     //Timeout check: abort if extraction takes too long
-                                    if ((DateTime.UtcNow - startTime) > TimeSpan.FromSeconds(runParams.MaxExtractionSeconds))
+                                    if ((DateTime.UtcNow - prevTime) > TimeSpan.FromSeconds(runParams.MaxExtractionSeconds))
                                     {
                                         string msg =
                                             $"Timeout occurred while running. Extraction exceeded timeout: {runParams.MaxExtractionSeconds} so exiting extraction routine";
@@ -435,7 +432,8 @@ namespace Puck.Services
                                         throw new Exception(msg);
                                     }
 
-                                    weight += _extractionWeightIncrement;
+                                    //var extractionWeight = await _ioProxy.GetScaleWeightAsync(allCtSrc.Token);
+
                                     _stateDeltaSubject.OnNext(new ExtractionWeightChanged(weight));
                                     var pressure = GetGroupHeadPressure();
                                     _stateDeltaSubject.OnNext(new PressureChanged(pressure));
@@ -456,7 +454,9 @@ namespace Puck.Services
 
                                     // Wait between PID iterations, responsive to cancellation
                                     await Task.Delay(TimeSpan.FromMilliseconds(_pidLoopDelayMs), allCtSrc.Token);
-                                    var output = _pid.PID_iterate(runParams.TargetPressureBar, pressure.Value, DateTime.UtcNow - startTime);
+                                    var currTime = DateTime.UtcNow;
+                                    var output = _pid.PID_iterate(runParams.TargetPressureBar, pressure.Value, currTime - prevTime);
+                                    prevTime = currTime;
                                     await ApplyPumpSpeedInternalAsync(output, allCtSrc.Token);
                                 }
 
@@ -867,7 +867,7 @@ namespace Puck.Services
         {
             // Gather temperature controller states
             double groupHeadTemp = await _tempProxy[TemperatureControllerId.GroupHead].GetProcessValueAsync(CancellationToken.None);
-            double thermoblockTemp = await  _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValueAsync(CancellationToken.None);
+            double thermoblockTemp = await _tempProxy[TemperatureControllerId.ThermoBlock].GetProcessValueAsync(CancellationToken.None);
             // For heater enabled, you may need to add a method/property to your controller or proxy
             bool groupHeadHeaterEnabled = false; // Placeholder
             bool thermoblockHeaterEnabled = false; // Placeholder
@@ -913,8 +913,8 @@ namespace Puck.Services
 
         // Wrapper to set temperature and emit state changes
         private async Task SetTemperatureSynchronouslyAsync(
-            TemperatureControllerId controllerId, 
-            int setpoint, 
+            TemperatureControllerId controllerId,
+            int setpoint,
             TimeSpan timeout,
             double tolerance,
             CancellationToken ct)
