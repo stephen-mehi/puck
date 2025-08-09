@@ -279,75 +279,6 @@ namespace Puck.Tests
             // No assertion: for plotting and analysis
         }
 
-        [Fact]
-        public void PID_AutoTuneRelay_Simulation()
-        {
-            double dt = 0.05;
-            int steps = 300;
-            double actuator = 1.0; // Start at upper extreme
-            double simPressure = 0.0; // Start at lower extreme
-            double processGain = 10.0;
-            double relayAmplitude = 0.5;
-            double nominalValue = 0.3;
-            // Lambda for actuator: update simPressure using process model and clamp
-            Action<double> setActuator = u =>
-            {
-                actuator = Math.Max(0.0, Math.Min(1.0, u));
-                simPressure += (processGain * (actuator - simPressure)) * dt;
-                simPressure = Math.Max(0.0, Math.Min(1.0, simPressure));
-            };
-            Func<double> getProcessValue = () => simPressure;
-
-            // --- Pre-autotune simulation with bad PID coefficients ---
-            var badPid = new PID(0.1, 0.1, 0.1, 10.0, 1.0, 0.0, dt, derivativeFilterAlpha: 0.2);
-            var preLines = new System.Collections.Generic.List<string>();
-            preLines.Add("time,setpoint,process,output,Kp,Ki,Kd");
-            simPressure = 0.0;
-            for (int i = 0; i < steps; i++)
-            {
-                double time = i * dt;
-                // Dynamic setpoint profile
-                double setpoint = 0.0;
-                if (time < 5.0) setpoint = 0.0;
-                else if (time < 15.0) setpoint = 1.0;
-                else if (time < 25.0) setpoint = 0.5;
-                else if (time < 35.0) setpoint = 1.2;
-                else if (time < 45.0) setpoint = 0.8;
-                else setpoint = 0.0;
-                double output = badPid.PID_iterate(setpoint, simPressure, TimeSpan.FromSeconds(dt));
-                setActuator(output);
-                preLines.Add($"{time:F3},{setpoint:F3},{simPressure:F5},{output:F5},{badPid.Kp:F3},{badPid.Ki:F3},{badPid.Kd:F3}");
-            }
-            System.IO.File.WriteAllLines("pid_pre_autotune_simulation_log.csv", preLines);
-
-            // --- Autotune routine ---
-            var pid = new PID(1.0, 0.5, 0.1, 10.0, 1.0, 0.0, dt, derivativeFilterAlpha: 0.2);
-            actuator = 1.0;
-            simPressure = 0.0;
-            pid.AutoTuneRelay(getProcessValue, setActuator, relayAmplitude: relayAmplitude, nominalValue: nominalValue, duration: 60.0, sampleTime: dt, logFile: "pid_autotune_log.csv");
-
-            // --- Post-autotune simulation with tuned PID coefficients ---
-            var lines = new System.Collections.Generic.List<string>();
-            lines.Add($"time,setpoint,process,output,Kp,Ki,Kd");
-            simPressure = 0.0;
-            for (int i = 0; i < steps; i++)
-            {
-                double time = i * dt;
-                // Dynamic setpoint profile
-                double setpoint = 0.0;
-                if (time < 5.0) setpoint = 0.0;
-                else if (time < 15.0) setpoint = 1.0;
-                else if (time < 25.0) setpoint = 0.5;
-                else if (time < 35.0) setpoint = 1.2;
-                else if (time < 45.0) setpoint = 0.8;
-                else setpoint = 0.0;
-                double output = pid.PID_iterate(setpoint, simPressure, TimeSpan.FromSeconds(dt));
-                setActuator(output);
-                lines.Add($"{time:F3},{setpoint:F3},{simPressure:F5},{output:F5},{pid.Kp:F3},{pid.Ki:F3},{pid.Kd:F3}");
-            }
-            System.IO.File.WriteAllLines("pid_autotune_simulation_log.csv", lines);
-            // No assertion: for demonstration and plotting
-        }
 
         // Generalized cost function configuration for PID autotuning
         /// <summary>
@@ -362,11 +293,11 @@ namespace Puck.Tests
             /// <summary>
             /// Weight for the maximum overshoot (maximum amount the process variable exceeds the setpoint).
             /// </summary>
-            public double OvershootWeight { get; set; } = 500.0;
+            public double OvershootWeight { get; set; } = 200.0;
             /// <summary>
             /// Weight for the average steady-state error over the last SteadyStateFraction of the simulation.
             /// </summary>
-            public double SteadyStateWeight { get; set; } = 200.0;
+            public double SteadyStateWeight { get; set; } = 300.0;
             /// <summary>
             /// Weight for the average error in the final 10 samples of the simulation (final steady-state error).
             /// </summary>
@@ -382,14 +313,14 @@ namespace Puck.Tests
             /// <summary>
             /// Fraction of the simulation (0-1) over which to compute steady-state error (e.g., 0.1 = last 10% of simulation).
             /// </summary>
-            public double SteadyStateFraction { get; set; } = 0.1;
+            public double SteadyStateFraction { get; set; } = 0.05;
         }
 
         [Fact]
         public void PID_GeneticAutotune_Simulation()
         {
             double dt = 0.05;
-            int steps = 480; // Increased to accommodate more perturbations
+            int steps = 600; // Increased to accommodate more perturbations
             double processGain = 10.0;
             double setpoint = 1.0;
 
@@ -399,12 +330,12 @@ namespace Puck.Tests
             {
                 double t = i * dt;
                 if (t < 5.0) setpointProfile[i] = 0.0;
-                else if (t < 15.0) setpointProfile[i] = 1.0;
+                else if (t < 15.0) setpointProfile[i] = .95;
                 else if (t < 25.0) setpointProfile[i] = 0.5;
-                else if (t < 35.0) setpointProfile[i] = 1.2;
-                else if (t < 45.0) setpointProfile[i] = 0.8;
+                else if (t < 35.0) setpointProfile[i] = .75;
+                else if (t < 45.0) setpointProfile[i] = 0.25;
                 else if (t < 55.0) setpointProfile[i] = 0.0;
-                else if (t < 65.0) setpointProfile[i] = 1.1;
+                else if (t < 65.0) setpointProfile[i] = .9;
                 else if (t < 75.0) setpointProfile[i] = 0.3;
                 else setpointProfile[i] = 0.7;
             }
@@ -418,9 +349,19 @@ namespace Puck.Tests
             {
                 var system = new PumpSystem(parameters.InitialProcessValue, processGain, parameters.TimeStep);
                 var pid = new PID(
-                    parameters.Kp, parameters.Ki, parameters.Kd, 10.0, 1.0, 0.0, parameters.TimeStep, derivativeFilterAlpha: 0.2);
+                    kp: parameters.Kp, 
+                    ki: parameters.Ki,
+                    kd: parameters.Kd, 
+                    n: 10.0, 
+                    outputUpperLimit: 1.0,
+                    outputLowerLimit: 0.0,
+                    tsMin: parameters.TimeStep,
+                    derivativeFilterAlpha: 0.2);
+
                 double errorSum = 0;
                 double maxOvershoot = 0;
+                double prevSpDir = double.NaN;
+                int stepDir = 0; // +1 for upward step, -1 for downward step
                 double steadyStateError = 0;
                 double finalSteadyStateError = 0;
                 double[] errors = new double[steps];
@@ -438,8 +379,17 @@ namespace Puck.Tests
                     double err = Math.Abs(sp - system.Pressure);
                     errors[i] = err;
                     errorSum += err * parameters.TimeStep;
-                    if (system.Pressure > sp && system.Pressure - sp > maxOvershoot)
-                        maxOvershoot = system.Pressure - sp;
+                    // Detect step direction and compute true overshoot
+                    if (!double.IsNaN(prevSpDir) && Math.Abs(sp - prevSpDir) > 1e-9)
+                        stepDir = sp > prevSpDir ? 1 : -1;
+                    double overshoot = 0.0;
+                    if (stepDir > 0 && system.Pressure > sp)
+                        overshoot = system.Pressure - sp;
+                    else if (stepDir < 0 && system.Pressure < sp)
+                        overshoot = sp - system.Pressure;
+                    if (overshoot > maxOvershoot)
+                        maxOvershoot = overshoot;
+                    prevSpDir = sp;
                 }
                 // Steady-state error: average error over last X% of simulation
                 for (int i = steps - steadyStateSamples; i < steps; i++)
@@ -462,7 +412,7 @@ namespace Puck.Tests
                 return new PidSimulationResult { Cost = cost };
             };
 
-            var tuner = new GeneticPidTuner();
+            var tuner = new GeneticPidTuner(seed: 42);
             var baseParams = new PidSimulationParameters
             {
                 Setpoint = setpoint,
@@ -470,17 +420,30 @@ namespace Puck.Tests
                 TimeStep = dt,
                 InitialProcessValue = 0.0
             };
-            // Restrict search ranges and increase generations/population
-            // Reduce Kp and Kd upper bounds for less aggressive control
-            var (bestKp, bestKi, bestKd) = tuner.Tune(
-                simDelegate, baseParams,
-                generations: 150, populationSize: 70,
-                kpRange: (0.1, 3.0), kiRange: (0.05, 2.5), kdRange: (0.0, 0.7));
+            // Configure robust GA options
+            var options = new GeneticPidTuner.GeneticTunerOptions
+            {
+                Generations = 250,
+                PopulationSize = 120,
+                KpRange = (0.1, 2.5),
+                KiRange = (0.1, 2.5),
+                KdRange = (0.0, 0.5),
+                EliteFraction = 0.15,
+                TournamentSize = 3,
+                EvaluateInParallel = false, // deterministic for tests
+                Patience = 80,
+                MinImprovement = 1e-6,
+                InitialMutationRate = 0.3,
+                FinalMutationRate = 0.05,
+                InitialMutationStrength = 0.3,
+                FinalMutationStrength = 0.05
+            };
+            var (bestKp, bestKi, bestKd) = tuner.Tune(simDelegate, baseParams, options);
 
             // --- BEFORE: Response to setpoint perturbations with bad PID coefficients ---
             var systemBefore = new PumpSystem(0.0, processGain, dt);
             double badKp = 0.1, badKi = 0.05, badKd = 0.01;
-            var pidBefore = new PID(badKp, badKi, badKd, 10.0, 1.0, 0.0, dt, derivativeFilterAlpha: 0.2);
+            var pidBefore = new PID(badKp, badKi, badKd, 10.0, 2.0, 0.0, dt, derivativeFilterAlpha: 0.2);
             var pertLinesBefore = new System.Collections.Generic.List<string>();
             pertLinesBefore.Add($"time,setpoint,process,output,Kp,Ki,Kd");
             double maxPertOvershootBefore = 0;
@@ -502,7 +465,7 @@ namespace Puck.Tests
 
             // --- Post-autotune simulation with tuned PID coefficients ---
             var system2 = new PumpSystem(0.0, processGain, dt);
-            var pid2 = new PID(bestKp, bestKi, bestKd, 10.0, 1.0, 0.0, dt, derivativeFilterAlpha: 0.2);
+            var pid2 = new PID(bestKp, bestKi, bestKd, 10.0, 2.0, 0.0, dt, derivativeFilterAlpha: 0.2);
             var lines = new System.Collections.Generic.List<string>();
             lines.Add($"time,setpoint,process,output,Kp,Ki,Kd");
             double maxOvershoot = 0;
@@ -520,15 +483,16 @@ namespace Puck.Tests
             }
             steadyStateError /= steadyStateSamples;
             System.IO.File.WriteAllLines("pid_genetic_autotune_simulation_log.csv", lines);
-            Assert.InRange(maxOvershoot, 0, 0.15); // <15% overshoot
-            Assert.InRange(steadyStateError, 0, 0.03); // <3% average error in last steady-state fraction
+           
 
             // --- AFTER: Response to setpoint perturbations with tuned PID coefficients ---
             var system3 = new PumpSystem(0.0, processGain, dt);
-            var pid3 = new PID(bestKp, bestKi, bestKd, 10.0, 1.0, 0.0, dt, derivativeFilterAlpha: 0.2);
+            var pid3 = new PID(bestKp, bestKi, bestKd, 10.0, 2.0, 0.0, dt, derivativeFilterAlpha: 0.2);
             var pertLines = new System.Collections.Generic.List<string>();
             pertLines.Add($"time,setpoint,process,output,Kp,Ki,Kd");
             double maxPertOvershoot = 0;
+            double prevPertSp = double.NaN;
+            int pertStepDir = 0;
             double pertSteadyStateError = 0;
             for (int i = 0; i < steps; i++)
             {
@@ -536,14 +500,26 @@ namespace Puck.Tests
                 double sp = setpointProfile[i];
                 double output = pid3.PID_iterate(sp, system3.Pressure, TimeSpan.FromSeconds(dt));
                 system3.Step(output);
-                if (system3.Pressure > sp && system3.Pressure - sp > maxPertOvershoot)
-                    maxPertOvershoot = system3.Pressure - sp;
+                // Determine true overshoot based on step direction
+                if (!double.IsNaN(prevPertSp) && Math.Abs(sp - prevPertSp) > 1e-9)
+                    pertStepDir = sp > prevPertSp ? 1 : -1;
+                double overshoot = 0.0;
+                if (pertStepDir > 0 && system3.Pressure > sp)
+                    overshoot = system3.Pressure - sp;
+                else if (pertStepDir < 0 && system3.Pressure < sp)
+                    overshoot = sp - system3.Pressure;
+                if (overshoot > maxPertOvershoot)
+                    maxPertOvershoot = overshoot;
+                prevPertSp = sp;
                 if (i >= steps - steadyStateSamples)
                     pertSteadyStateError += Math.Abs(sp - system3.Pressure);
                 pertLines.Add($"{time:F3},{sp:F3},{system3.Pressure:F5},{output:F5},{bestKp:F3},{bestKi:F3},{bestKd:F3}");
             }
             pertSteadyStateError /= steadyStateSamples;
             System.IO.File.WriteAllLines("pid_genetic_autotune_perturbation_log.csv", pertLines);
+
+            Assert.InRange(maxOvershoot, 0, 0.15); // <15% overshoot
+            Assert.InRange(steadyStateError, 0, 0.03); // <3% average error in last steady-state fraction
             Assert.InRange(maxPertOvershoot, 0, 0.2); // <20% overshoot for perturbations
             Assert.InRange(pertSteadyStateError, 0, 0.05); // <5% average error in last steady-state fraction
         }

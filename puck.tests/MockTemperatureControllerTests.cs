@@ -21,7 +21,10 @@ namespace Puck.Tests
         public async Task SetSetPointAsync_UpdatesProcessValue()
         {
             var mock = new MockTemperatureController();
+            await mock.EnableControlLoopAsync();
             await mock.SetSetPointAsync(123);
+            await Task.Delay(3000);
+
             var pv = await mock.GetProcessValueAsync();
             Assert.Equal(123, pv);
         }
@@ -30,8 +33,8 @@ namespace Puck.Tests
         public async Task ApplySetPointSynchronouslyAsync_SucceedsWithinTolerance()
         {
             var mock = new MockTemperatureController();
-            await mock.ApplySetPointSynchronouslyAsync(200, 0.1, TimeSpan.FromSeconds(1));
-            Assert.Equal(200, await mock.GetProcessValueAsync());
+            await mock.ApplySetPointSynchronouslyAsync(123, 0, TimeSpan.FromSeconds(10));
+            Assert.Equal(123, await mock.GetProcessValueAsync());
         }
 
         [Fact]

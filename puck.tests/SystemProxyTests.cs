@@ -35,7 +35,15 @@ namespace Puck.Tests
 
             pauseContainer = new PauseContainer();
             var logger = new LoggerFactory().CreateLogger<SystemService>();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid =
+                new PID(
+                    kp: 1,
+                    ki: 1,
+                    kd: 1,
+                    n: 1,
+                    outputUpperLimit: 1,
+                    outputLowerLimit: 0);
+
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             return new SystemProxy(logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo);
@@ -121,19 +129,23 @@ namespace Puck.Tests
         {
             var proxy = CreateSystemProxy(out _, out _, out _);
             var cts = new CancellationTokenSource();
-            typeof(SystemProxy).GetField("_runLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            typeof(SystemProxy)
+                .GetField("_runLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
                 .SetValue(proxy, new SemaphoreSlim(0, 1));
+
             await Assert.ThrowsAsync<Exception>(() => proxy.ApplyPumpSpeedAsync(5.0, cts.Token));
         }
 
         [Fact]
-        public void GetRunState_ReturnsExpectedState()
+        public async Task GetRunState_ReturnsExpectedState()
         {
             var proxy = CreateSystemProxy(out var phoenixMock, out _, out _);
-            phoenixMock.SetDigitalInput(1, true);
+            await proxy.RunAsync(new RunParameters(), CancellationToken.None);
+            //await phoenixMock.SetDigitalOutputStateAsync(1, true, CancellationToken.None);
             Assert.Equal(RunState.Run, proxy.GetRunState());
 
-            phoenixMock.SetDigitalInput(1, false);
+            await proxy.SetRunStateIdleAsync(CancellationToken.None);
+            //await phoenixMock.SetDigitalOutputStateAsync(1, false, CancellationToken.None);
             Assert.Equal(RunState.Idle, proxy.GetRunState());
         }
 
@@ -194,7 +206,13 @@ namespace Puck.Tests
             };
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var pauseContainer = new PauseContainer();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var proxy2 = new SystemProxy(logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo);
@@ -216,7 +234,13 @@ namespace Puck.Tests
             var ioMock = new MockPhoenixProxy(analogInputs: new ushort[] { 1 });
             ioMock.SetAnalogInput(1, 9.5); // Set pressure
             var pauseCont = new PauseContainer();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
@@ -248,7 +272,13 @@ namespace Puck.Tests
             ioMock.SetAnalogInput(1, 9.5);
             var pauseCont = new PauseContainer();
             pauseCont.PauseAsync(System.Threading.CancellationToken.None).GetAwaiter().GetResult();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
@@ -277,7 +307,13 @@ namespace Puck.Tests
             var ioMock = new MockPhoenixProxy(analogInputs: new ushort[] { 1 });
             ioMock.SetAnalogInput(1, 9.5);
             var pauseCont = new PauseContainer();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
@@ -311,7 +347,13 @@ namespace Puck.Tests
             ioMock.SetDigitalInput(2, false);
             ioMock.SetDigitalInput(3, false);
             var pauseCont = new PauseContainer();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
@@ -319,7 +361,7 @@ namespace Puck.Tests
             var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
 
             // Act
-            var state =  await proxy.GetSystemStateAsync();
+            var state = await proxy.GetSystemStateAsync();
 
             // Assert
             Assert.True(Enum.IsDefined(typeof(ValveState), state.GroupHeadValveState));
@@ -344,7 +386,13 @@ namespace Puck.Tests
             ioMock.SetAnalogInput(1, 9.5);
             ioMock.SetDigitalInput(1, true); // For run state
             var pauseCont = new PauseContainer();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
@@ -386,7 +434,13 @@ namespace Puck.Tests
             ioMock.SetAnalogInput(pressureIO, 9.5);
             ioMock.SetDigitalInput(runStatusInputIO, true); // Set system to Run state
             var pauseCont = new PauseContainer();
-            var pid = new PID(1, 1, 1, 1, 1, 1);
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;

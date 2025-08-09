@@ -15,7 +15,7 @@ namespace Puck.Services.TemperatureController
         private bool _controlLoopActive = false;
         private bool _disposed = false;
         private TimeSpan _responseDelay = TimeSpan.FromMilliseconds(50);
-        private double _approachRate = 0.1; // fraction of difference per step
+        private double _approachRate = 0.25; // fraction of difference per step
         private int _approachIntervalMs = 100; // ms between steps
         private CancellationTokenSource? _loopCts;
         private readonly object _lock = new();
@@ -41,7 +41,7 @@ namespace Puck.Services.TemperatureController
         public async Task ApplySetPointSynchronouslyAsync(int tempSetPoint, double tolerance, TimeSpan timeout, CancellationToken ct = default)
         {
             await SetSetPointAsync(tempSetPoint, ct);
-            _controlLoopActive = true;
+            await EnableControlLoopAsync(ct);
             var start = DateTime.UtcNow;
             while (true)
             {

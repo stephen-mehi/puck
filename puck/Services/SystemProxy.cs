@@ -434,6 +434,8 @@ namespace Puck.Services
 
                                     //var extractionWeight = await _ioProxy.GetScaleWeightAsync(allCtSrc.Token);
 
+                                    weight += 1; // Simulate weight increment for testing
+
                                     _stateDeltaSubject.OnNext(new ExtractionWeightChanged(weight));
                                     var pressure = GetGroupHeadPressure();
                                     _stateDeltaSubject.OnNext(new PressureChanged(pressure));

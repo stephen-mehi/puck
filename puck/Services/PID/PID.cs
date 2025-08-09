@@ -142,13 +142,15 @@ public class PID : IPID
     public bool InstabilityAlarm { get; private set; }
     // Setpoint ramping
     private double _lastSetpoint = double.NaN;
-    // Soft start (damped start) fields
-    private int _softStartSteps = 5;
-    private int _softStartCounter = 0;
-    private bool _softStartActive = false;
-    private double _softStartOutput = 0;
-    private double _prevSetpoint = double.NaN;
-    private const double _softStartThreshold = 0.01;
+    // Bumpless transfer support
+    private double _prevSetpointForBumpless = double.NaN;
+    private const double _bumplessSetpointThreshold = 0.01;
+    private double _lastKp;
+    private double _lastKi;
+    private double _lastKd;
+    // Optional output low-pass filter (time constant in seconds; 0 disables)
+    private double _outputFilterTimeConstant = 0.0;
+    private double _lastFilteredOutput = 0.0;
 
     /// <summary>
     /// PID Constructor
@@ -207,6 +209,10 @@ public class PID : IPID
         _integralSeparationBand = integralSeparationBand;
         _feedforward = 0.0;
         _lastSetpoint = double.NaN;
+        _lastKp = Kp;
+        _lastKi = Ki;
+        _lastKd = Kd;
+        _lastFilteredOutput = 0.0;
     }
 
     /// <summary>
@@ -270,6 +276,11 @@ public class PID : IPID
     public double IntegralSeparationBand { get => _integralSeparationBand; set => _integralSeparationBand = value; }
 
     /// <summary>
+    /// Optional output low-pass filter time constant in seconds. Set to 0 to disable.
+    /// </summary>
+    public double OutputFilterTimeConstant { get => _outputFilterTimeConstant; set => _outputFilterTimeConstant = value < 0 ? 0 : value; }
+
+    /// <summary>
     /// PID iterator, call this function every sample period to get the current controller output.
     /// Implements advanced anti-windup, derivative filtering, setpoint ramping, feedforward, output rate limiting, integral separation, deadband, and diagnostics.
     /// </summary>
@@ -291,15 +302,6 @@ public class PID : IPID
                 _samplePeriod = 0.001; // Defensive: never zero or negative
             }
 
-            // Soft start: detect setpoint change
-            if (!double.IsNaN(_prevSetpoint) && Math.Abs(setPoint - _prevSetpoint) > _softStartThreshold)
-            {
-                _softStartActive = true;
-                _softStartCounter = _softStartSteps;
-                _softStartOutput = _lastOutput;
-            }
-            _prevSetpoint = setPoint;
-
             // Setpoint ramping
             double rampedSetpoint = setPoint;
             bool isFirstCall = double.IsNaN(_lastSetpoint);
@@ -315,19 +317,15 @@ public class PID : IPID
             double error = rampedSetpoint - processValue;
             LastError = error;
 
-            // Deadband: if error is within deadband, output is zero (plus feedforward), and do not update integral/derivative
-            if (Math.Abs(error) < _deadband)
-            {
-                // Do not update integral or derivative
-                return _feedforward;
-            }
+            // Deadband flag: if true, we will skip integral and derivative state updates
+            bool inDeadband = Math.Abs(error) < _deadband;
 
             // Integral separation
-            bool integrate = Math.Abs(error) < _integralSeparationBand;
+            bool integrate = !inDeadband && Math.Abs(error) < _integralSeparationBand;
 
             // Integral term with advanced anti-windup (conditional integration)
             double previousIntegral = _integral;
-            if (integrate)
+            if (integrate && Ki > 0)
                 _integral += error * _samplePeriod;
 
             // Derivative on measurement (to avoid derivative kick) with filtering
@@ -348,11 +346,40 @@ public class PID : IPID
                     rawDerivative = 0;
                 }
             }
-            double filteredDerivative = _derivativeFilterAlpha * rawDerivative + (1 - _derivativeFilterAlpha) * _lastDerivative;
-            _lastDerivative = filteredDerivative;
+            double filteredDerivative = inDeadband
+                ? _lastDerivative // do not update derivative state within deadband
+                : _derivativeFilterAlpha * rawDerivative + (1 - _derivativeFilterAlpha) * _lastDerivative;
+            if (!inDeadband)
+            {
+                _lastDerivative = filteredDerivative;
+            }
+
+            // Bumpless transfer on significant setpoint change (prevents output jump)
+            if (!double.IsNaN(_prevSetpointForBumpless) && Math.Abs(setPoint - _prevSetpointForBumpless) > _bumplessSetpointThreshold && Ki > 0)
+            {
+                double proportionalTerm = Kp * proportionalError;
+                double derivativeTerm = Kd * (inDeadband ? _lastDerivative : ( _derivativeFilterAlpha * rawDerivative + (1 - _derivativeFilterAlpha) * _lastDerivative ));
+                double desiredUnclamped = _lastOutput;
+                _integral = (desiredUnclamped - _feedforward - proportionalTerm - derivativeTerm) / Ki;
+            }
+            _prevSetpointForBumpless = setPoint;
+
+            // Bumpless transfer on gain changes
+            if ((Kp != _lastKp || Ki != _lastKi || Kd != _lastKd) && Ki > 0)
+            {
+                double proportionalTerm = Kp * proportionalError;
+                double derivativeTerm = Kd * _lastDerivative;
+                double desiredUnclamped = _lastOutput;
+                _integral = (desiredUnclamped - _feedforward - proportionalTerm - derivativeTerm) / Ki;
+                _lastKp = Kp;
+                _lastKi = Ki;
+                _lastKd = Kd;
+            }
 
             // PID formula with setpoint weighting and feedforward
-            double output = Kp * proportionalError + Ki * _integral + Kd * filteredDerivative + _feedforward;
+            double output = inDeadband
+                ? _feedforward
+                : Kp * proportionalError + Ki * _integral + Kd * filteredDerivative + _feedforward;
 
             // Clamp output and apply anti-windup (back calculation)
             double unclampedOutput = output;
@@ -361,27 +388,16 @@ public class PID : IPID
             {
                 output = OutputUpperLimit;
                 // Back-calculation anti-windup: bleed off integral
-                if (integrate)
+                if (integrate && Ki > 0)
                     _integral = previousIntegral + (OutputUpperLimit - unclampedOutput) / Ki;
                 WindupAlarm = true;
             }
             else if (output < OutputLowerLimit)
             {
                 output = OutputLowerLimit;
-                if (integrate)
+                if (integrate && Ki > 0)
                     _integral = previousIntegral + (OutputLowerLimit - unclampedOutput) / Ki;
                 WindupAlarm = true;
-            }
-
-            // Soft start: damp output after setpoint change
-            if (_softStartActive && _softStartCounter > 0)
-            {
-                double alpha = 1.0 / _softStartCounter;
-                output = (1 - alpha) * _softStartOutput + alpha * output;
-                _softStartOutput = output;
-                _softStartCounter--;
-                if (_softStartCounter <= 0)
-                    _softStartActive = false;
             }
 
             // Output rate limiting
@@ -391,8 +407,18 @@ public class PID : IPID
                 output = Math.Max(_lastOutput - maxDelta, Math.Min(_lastOutput + maxDelta, output));
             }
 
+            // Optional output low-pass filtering
+            if (_outputFilterTimeConstant > 0)
+            {
+                double alpha = _samplePeriod / (_outputFilterTimeConstant + _samplePeriod);
+                output = _lastFilteredOutput + alpha * (output - _lastFilteredOutput);
+                // Re-clamp after filtering to enforce bounds strictly
+                output = Math.Max(OutputLowerLimit, Math.Min(OutputUpperLimit, output));
+                _lastFilteredOutput = output;
+            }
+
             // Save for next iteration
-            _lastProcessValue = processValue;
+            _lastProcessValue = processValue; // keep measurement history even in deadband
             _lastOutput = output;
 
             // Instability alarm: detect oscillation or excessive output
@@ -536,12 +562,15 @@ public class PID : IPID
         double a = ampSum / ampCount / 2.0; // amplitude (half peak-to-peak)
         // Ultimate gain
         double Ku = (4 * relayAmplitude) / (Math.PI * a);
-        // Ziegler-Nichols PID tuning
+        // Ziegler-Nichols PID tuning (parallel form)
         double Kp = 0.6 * Ku;
-        double Ti = 0.5 * Pu;
-        double Td = 0.125 * Pu;
+        double Ti = 0.5 * Pu;   // integral time
+        double Td = 0.125 * Pu; // derivative time
+        // Map to gains: Ki = Kp / Ti, Kd = Kp * Td
+        double Ki = Ti > 0 ? Kp / Ti : 0.0;
+        double Kd = Kp * Td;
         // Set new gains (thread-safe)
-        SetGains(Kp, Ti, Td);
+        SetGains(Kp, Ki, Kd);
         if (logFile != null)
             System.IO.File.WriteAllLines(logFile, log);
     }
