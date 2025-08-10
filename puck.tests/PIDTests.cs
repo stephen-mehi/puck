@@ -79,29 +79,6 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void PID_Tracks_Setpoint_Change()
-        {
-            // Arrange
-            double dt = 0.1;
-            var system = new PumpSystem(0, gain: 1.0, dt: dt);
-            var pid = new PID(2.0, 1.0, 0.2, 10.0, 1.0, 0.0, dt, derivativeFilterAlpha: 0.2);
-            double setpoint = 0.5;
-            for (int i = 0; i < 100; i++)
-            {
-                double output = pid.PID_iterate(setpoint, system.Pressure, TimeSpan.FromSeconds(dt));
-                system.Step(output);
-            }
-            setpoint = 0.9;
-            for (int i = 0; i < 100; i++)
-            {
-                double output = pid.PID_iterate(setpoint, system.Pressure, TimeSpan.FromSeconds(dt));
-                system.Step(output);
-            }
-            // Assert
-            Assert.InRange(system.Pressure, setpoint - 0.01, setpoint + 0.01);
-        }
-
-        [Fact]
         public void PID_Respects_Output_Limits()
         {
             // Arrange

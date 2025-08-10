@@ -197,7 +197,7 @@ namespace Puck.Tests
         {
             var proxy = CreateSystemProxy(out var phoenixMock, out _, out _);
             // Remove all digital inputs
-            phoenixMock = new MockPhoenixProxy(digitalInputs: Array.Empty<ushort>());
+            phoenixMock = new MockPhoenixProxy(digitalInputs: Array.Empty<ushort>(), digitalOutputs: Array.Empty<ushort>());
             var logger = new LoggerFactory().CreateLogger<SystemService>();
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
             {
@@ -304,7 +304,12 @@ namespace Puck.Tests
             tempMocks[TemperatureControllerId.GroupHead].SetProcessValue(0);
             tempMocks[TemperatureControllerId.ThermoBlock].SetProcessValue(0);
 
-            var ioMock = new MockPhoenixProxy(analogInputs: new ushort[] { 1 });
+            var ioMock = new MockPhoenixProxy(
+                digitalInputs: new ushort[] { 1, 2, 3 , 4 },
+                digitalOutputs: new ushort[] { 1, 2, 3 , 4 },
+                analogInputs: new ushort[] { 1 },
+                analogOutputs: new ushort[] { 1 });
+            
             ioMock.SetAnalogInput(1, 9.5);
             var pauseCont = new PauseContainer();
             var pid = new PID(
@@ -338,8 +343,8 @@ namespace Puck.Tests
                 { TemperatureControllerId.ThermoBlock, new MockTemperatureController() }
             };
             var ioMock = new MockPhoenixProxy(
-                digitalInputs: new ushort[] { 1, 2, 3 },
-                digitalOutputs: new ushort[] { 1, 2, 3 },
+                digitalInputs: new ushort[] { 1, 2, 3, 4 },
+                digitalOutputs: new ushort[] { 1, 2, 3, 4 },
                 analogInputs: new ushort[] { 1 },
                 analogOutputs: new ushort[] { 1 });
             ioMock.SetAnalogInput(1, 9.5);
@@ -379,8 +384,8 @@ namespace Puck.Tests
                 { TemperatureControllerId.ThermoBlock, new MockTemperatureController() }
             };
             var ioMock = new MockPhoenixProxy(
-                digitalInputs: new ushort[] { 1, 2, 3 },
-                digitalOutputs: new ushort[] { 1, 2, 3 },
+                digitalInputs: new ushort[] { 1, 2, 3, 4 },
+                digitalOutputs: new ushort[] { 1, 2, 3, 4 },
                 analogInputs: new ushort[] { 1 },
                 analogOutputs: new ushort[] { 1 });
             ioMock.SetAnalogInput(1, 9.5);

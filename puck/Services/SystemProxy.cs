@@ -631,7 +631,7 @@ namespace Puck.Services
         {
             //TODO: CHANGE THIS BACK TO DIGITAL INPUT ONCE CONNECTED TO HARDWARE
             if (!_ioProxy.DigitalOutputState.TryGetValue(_runStatusOutputIO, out var val))
-                throw new Exception($"Error in {nameof(GetRunState)} within {nameof(SystemProxy)}. No digital input found with index {_runStatusInputIO}");
+                throw new Exception($"Error in {nameof(GetRunState)} within {nameof(SystemProxy)}. No digital input found with index {_runStatusOutputIO}");
 
             if (!val.HasValue)
                 return RunState.None;
