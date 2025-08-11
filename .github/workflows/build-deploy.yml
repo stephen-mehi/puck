@@ -87,47 +87,56 @@ jobs:
     defaults:
       run:
         shell: powershell
-    env:
-      NEW_IMAGE: smehi/puck:${{ github.sha }}
-      KUBECONFIG_PATH: $HOME\.kube\config\client.config
     steps:
+      - uses: actions/checkout@v4
+
       - name: Kubectl tool installer
         uses: Azure/setup-kubectl@v3
         with:
           version: 'v1.30.0'
-          
-      - name: Sanity check image & container
-        shell: powershell
+
+      - name: Compute image & kubeconfig
         run: |
           $ErrorActionPreference = 'Stop'
           $newImage = "smehi/puck:${{ github.sha }}"
-          Write-Host "NEW_IMAGE = $newImage"
-      
-          # Use the actual file under the config directory
           $kube = Join-Path $HOME ".kube\config\client.config"
           if (-not (Test-Path $kube)) { throw "kubeconfig not found at $kube" }
-      
-          # Optional: verify the file is readable
-          kubectl --kubeconfig "$kube" config view 1>$null
-      
-          $container = kubectl --kubeconfig "$kube" get deploy puck-app -o jsonpath="{.spec.template.spec.containers[0].name}"
-          if ([string]::IsNullOrWhiteSpace($container)) { throw "Could not read container name from Deployment puck-app" }
-          Write-Host "Container name: $container"
-      
-          # Stash for later steps
           "NEW_IMAGE=$newImage"       >> $env:GITHUB_ENV
           "KUBECONFIG_PATH=$kube"     >> $env:GITHUB_ENV
-          "CONTAINER_NAME=$container" >> $env:GITHUB_ENV
-      
-      - name: Update image to new tag
-        shell: powershell
+
+      - name: Render manifest with image tag
         run: |
           $ErrorActionPreference = 'Stop'
-          kubectl --kubeconfig "$env:KUBECONFIG_PATH" set image deploy/puck-app "$env:CONTAINER_NAME=$env:NEW_IMAGE"
-      
-      - name: Wait for rollout
-        shell: powershell
+          $src = "puck-deploy.yaml"
+          if (-not (Test-Path $src)) { throw "Manifest not found: $src" }
+          $content = Get-Content -Raw $src
+          # Replace only the explicit token to avoid accidental matches
+          $rendered = $content -replace 'smehi/puck:latest', $env:NEW_IMAGE
+          $out = Join-Path $env:RUNNER_TEMP "puck-deploy.rendered.yaml"
+          Set-Content -Path $out -Value $rendered -NoNewline
+          "RENDERED_MANIFEST=$out" >> $env:GITHUB_ENV
+
+      - name: Delete old deployment (one-at-a-time)
+        continue-on-error: true
+        run: kubectl --kubeconfig "$env:KUBECONFIG_PATH" delete deployment puck-app
+
+      - name: Wait for termination
+        run: Start-Sleep -Seconds 12
+
+      - name: Apply rendered manifest
+        run: kubectl --kubeconfig "$env:KUBECONFIG_PATH" apply -f "$env:RENDERED_MANIFEST"
+
+      - name: Wait for deployment availability
+        run: kubectl --kubeconfig "$env:KUBECONFIG_PATH" rollout status deploy/puck-app --timeout=5m
+
+      - name: Debug on failure
+        if: failure()
         run: |
-          $ErrorActionPreference = 'Stop'
-          kubectl --kubeconfig "$env:KUBECONFIG_PATH" rollout status deploy/puck-app --timeout=5m
+          kubectl --kubeconfig "$env:KUBECONFIG_PATH" get deploy puck-app -o yaml
+          kubectl --kubeconfig "$env:KUBECONFIG_PATH" get rs -l app=puck
+          kubectl --kubeconfig "$env:KUBECONFIG_PATH" get pods -l app=puck -o wide
+          kubectl --kubeconfig "$env:KUBECONFIG_PATH" describe deploy puck-app
+          kubectl --kubeconfig "$env:KUBECONFIG_PATH" describe pods -l app=puck
+          kubectl --kubeconfig "$env:KUBECONFIG_PATH" logs -l app=puck --tail=200 --all-containers=true
+
 
