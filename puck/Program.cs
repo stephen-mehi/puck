@@ -57,6 +57,7 @@ builder
     .AddSingleton(runParams)
     .AddHostedService<SystemService>();
 
+
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -67,17 +68,71 @@ builder
 .AddLogging(builder =>
 {
     builder
-    .ClearProviders()
-    .AddDebug()
-    .AddSimpleConsole(o =>
-    {
-        o.IncludeScopes = true;
-        o.TimestampFormat = "HH:mm:ss ";
-    });
-
+      .AddSimpleConsole(o => { o.IncludeScopes = true; o.TimestampFormat = "O "; o.SingleLine = true; })
+  .AddDebug()
+  .SetMinimumLevel(LogLevel.Trace)
+  .AddFilter("Microsoft", LogLevel.Debug)
+  .AddFilter("Microsoft.AspNetCore", LogLevel.Debug)
+  .AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Trace)
+  .AddFilter("System.Net.Http.HttpClient", LogLevel.Information);
 });
 
+
+
 var app = builder.Build();
+
+var reqLogger = 
+    app
+    .Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("Requests");
+
+app.Use(async (ctx, next) =>
+{
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    try
+    {
+        await next();
+        reqLogger.LogInformation("HTTP {method} {path} -> {status} in {elapsed} ms",
+          ctx.Request.Method, ctx.Request.Path, ctx.Response.StatusCode, sw.ElapsedMilliseconds);
+    }
+    catch (Exception ex)
+    {
+        reqLogger.LogError(ex, "Unhandled exception for {method} {path}", ctx.Request.Method, ctx.Request.Path);
+        throw;
+    }
+});
+
+
+var lifecycleLogger =
+    app
+    .Services
+    .GetRequiredService<ILoggerFactory>()
+    .CreateLogger("Lifecycle");
+
+app
+    .Lifetime
+    .ApplicationStarted
+    .Register(() =>
+        lifecycleLogger.LogWarning("ApplicationStarted. PID={pid}, ENV={env}", Environment.ProcessId, app.Environment.EnvironmentName));
+
+app
+    .Lifetime
+    .ApplicationStopping
+    .Register(() =>
+        lifecycleLogger.LogCritical("ApplicationStopping (SIGTERM likely). Dumping basic info..."));
+
+app
+    .Lifetime
+    .ApplicationStopped
+    .Register(() =>
+        lifecycleLogger.LogCritical("ApplicationStopped"));
+
+AppDomain.CurrentDomain.ProcessExit += (_, __) =>
+  lifecycleLogger.LogCritical("ProcessExit fired");
+
+Console.CancelKeyPress += (_, e) =>
+  lifecycleLogger.LogCritical("CancelKeyPress: {key}, Cancel={cancel}", e.SpecialKey, e.Cancel);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
