@@ -10,6 +10,9 @@ jobs:
 
   build:
     runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell
     steps:
       - uses: actions/checkout@v4
 
@@ -17,7 +20,7 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
-          cache: false
+          cache: false   # no packages.lock.json; disable built-in cache
 
       - name: Restore dependencies
         run: dotnet restore
@@ -26,19 +29,21 @@ jobs:
         run: dotnet build --configuration Release --no-restore
 
       - name: Run tests
-        run: dotnet test --no-build --configuration Release
+        run: dotnet test --configuration Release --no-build
 
       - name: Build the Docker image (local only)
-        shell: pwsh
         run: |
-          $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $tag = "puck:$((git rev-parse --short HEAD))-$((Get-Date -Format 'yyyyMMddHHmmss'))"
           Write-Output $tag
           docker build -t $tag .
 
   docker:
     runs-on: self-hosted
     needs: build
-    if: github.event_name == 'push'   # don't push images for PRs
+    if: github.event_name == 'push'   # don't push on PRs
+    defaults:
+      run:
+        shell: powershell
     outputs:
       full_tag: ${{ steps.build_push.outputs.full_tag }}
     steps:
@@ -52,9 +57,8 @@ jobs:
 
       - id: build_push
         name: Build & Push Docker image
-        shell: pwsh
         run: |
-          $tag = "$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $tag = "$((git rev-parse --short HEAD))-$((Get-Date -Format 'yyyyMMddHHmmss'))"
           $full = "smehi/puck:$tag"
           Write-Output "Building $full"
           docker build -t "$full" .
@@ -67,15 +71,17 @@ jobs:
       name: dev
     runs-on: self-hosted
     needs: docker
-    if: github.event_name == 'push'   # don't deploy on PRs
+    if: github.event_name == 'push'
+    defaults:
+      run:
+        shell: powershell
     steps:
       - name: Kubectl tool installer
         uses: Azure/setup-kubectl@v3
         with:
-          version: 'v1.30.0'  # pin a version you support
+          version: 'v1.30.0'  # pin to a known-good version
 
       - name: Update image to new tag
-        shell: pwsh
         run: |
           $kube = "$HOME\.kube\config\client.config"
           kubectl --kubeconfig $kube set image deployment/puck-app puck=${{ needs.docker.outputs.full_tag }} --record
