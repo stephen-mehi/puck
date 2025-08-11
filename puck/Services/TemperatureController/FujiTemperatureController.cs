@@ -37,6 +37,10 @@ internal static class FujiPXFRegisters
 
     // Scale factor for percentage calculations
     public const double ScaleFactor = 10000.0;
+
+        // Temperature limits are represented in tenths of a degree on the device (0.1° units)
+        // e.g., 1995 means 199.5° in the configured unit (F here)
+        public const double TemperatureResolution = 10.0;
 }
 
 public class FujiPXFDriverPortConfiguration
@@ -204,8 +208,12 @@ public class FujiPXFDriver : IDisposable
         if (low >= high)
             throw new ArgumentException($"Low limit ({low}°F) must be less than high limit ({high}°F)");
 
-        await WriteSingleRegisterAsync(FujiPXFRegisters.ProcessValueLowLimit, low, ct);
-        await WriteSingleRegisterAsync(FujiPXFRegisters.ProcessValueHighLimit, high, ct);
+        // Device expects limits in 0.1° units; convert from whole-degree inputs to register representation
+        ushort lowReg = (ushort)Math.Round(low * FujiPXFRegisters.TemperatureResolution);
+        ushort highReg = (ushort)Math.Round(high * FujiPXFRegisters.TemperatureResolution);
+
+        await WriteSingleRegisterAsync(FujiPXFRegisters.ProcessValueLowLimit, lowReg, ct);
+        await WriteSingleRegisterAsync(FujiPXFRegisters.ProcessValueHighLimit, highReg, ct);
     }
 
     /// <summary>
@@ -215,7 +223,10 @@ public class FujiPXFDriver : IDisposable
     public async Task<(int low, int high)> GetProcessValueLimitsAsync(CancellationToken ct = default)
     {
         var limits = await ReadHoldingRegistersAsync(FujiPXFRegisters.ProcessValueLowLimit, 2, ct);
-        return (limits[0], limits[1]);
+        // Convert from 0.1° register units back to whole degrees for consumer API
+        int low = (int)Math.Round(limits[0] / FujiPXFRegisters.TemperatureResolution);
+        int high = (int)Math.Round(limits[1] / FujiPXFRegisters.TemperatureResolution);
+        return (low, high);
     }
 
     /// <summary>
@@ -224,8 +235,9 @@ public class FujiPXFDriver : IDisposable
     /// <returns></returns>
     public async Task<bool> IsControlLoopActiveAsync(CancellationToken ct = default)
     {
-        bool isActive = (await ReadHoldingRegistersAsync(FujiPXFRegisters.ControlLoopStatus, 1, ct))[0] == 1;
-        return isActive;
+        // 0 = RUN, 1 = STANDBY
+        ushort status = (await ReadHoldingRegistersAsync(FujiPXFRegisters.ControlLoopStatus, 1, ct))[0];
+        return status == FujiPXFRegisters.ControlLoopRun;
     }
 
     /// <summary>
@@ -234,13 +246,14 @@ public class FujiPXFDriver : IDisposable
     /// <returns>The current set value in Fahrenheit</returns>
     public async Task<double> GetSetValueAsync(CancellationToken ct = default)
     {
-        var sv = (await ReadHoldingRegistersAsync(FujiPXFRegisters.SetValue, 1, ct))[0];
+        // SV is reported as a percentage of span in 0.01% units (e.g., 556 => 5.56%)
+        ushort svRaw = (await ReadHoldingRegistersAsync(FujiPXFRegisters.SetValue, 1, ct))[0];
 
-        (int low, int high) = await GetProcessValueLimitsAsync();
+        (int low, int high) = await GetProcessValueLimitsAsync(ct);
 
-        var val = (sv * (high - low) / FujiPXFRegisters.ScaleFactor) + low;
-
-        return val;
+        double fraction = svRaw / FujiPXFRegisters.ScaleFactor; // 0.0..1.0
+        double valueF = low + (high - low) * fraction;
+        return valueF;
     }
 
     /// <summary>
@@ -249,11 +262,13 @@ public class FujiPXFDriver : IDisposable
     /// <returns>The current process value in Fahrenheit</returns>
     public async Task<double> GetProcessValueAsync(CancellationToken ct = default)
     {
-        (int low, int high) = await GetProcessValueLimitsAsync();
+        (int low, int high) = await GetProcessValueLimitsAsync(ct);
 
-        // percentage of full scale, for example, 556 means pv is at 5.56% of the full scale
-        var pv = (await ReadInputRegistersAsync(FujiPXFRegisters.ProcessValue, 1, ct))[0];
-        return low + (high - low) * (pv / FujiPXFRegisters.ScaleFactor);
+        // PV is percentage of span in 0.01% units
+        ushort pvRaw = (await ReadInputRegistersAsync(FujiPXFRegisters.ProcessValue, 1, ct))[0];
+        double fraction = pvRaw / FujiPXFRegisters.ScaleFactor; // 0.0..1.0
+        double valueF = low + (high - low) * fraction;
+        return valueF;
     }
 
     /// <summary>
@@ -306,7 +321,7 @@ public class FujiPXFDriver : IDisposable
     /// <returns></returns>
     public async Task SetSetValueAsync(int setValue, CancellationToken ct = default)
     {
-        (int low, int high) = await GetProcessValueLimitsAsync();
+        (int low, int high) = await GetProcessValueLimitsAsync(ct);
 
         if (setValue < low || setValue > high)
             throw new ArgumentOutOfRangeException(
@@ -315,9 +330,10 @@ public class FujiPXFDriver : IDisposable
                 $"Set value must be within the configured range ({low}°F, {high}°F). " +
                 $"Current process value limits can be adjusted using SetProcessValueLimitsAsync().");
 
-        var value = (ushort)(((double)(setValue - low)) / (double)(high - low) * FujiPXFRegisters.ScaleFactor);
-
-        await WriteSingleRegisterAsync(FujiPXFRegisters.SetValue, value, ct);
+        // Convert desired absolute °F value to device’s 0.01% of span units
+        double fraction = ((double)setValue - low) / (double)(high - low);
+        ushort svRaw = (ushort)Math.Round(Math.Clamp(fraction, 0.0, 1.0) * FujiPXFRegisters.ScaleFactor);
+        await WriteSingleRegisterAsync(FujiPXFRegisters.SetValue, svRaw, ct);
     }
 
     #region helper functions

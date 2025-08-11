@@ -79,16 +79,19 @@ builder.Services.AddSwaggerGen();
 
 builder
 .Services
-.AddLogging(builder =>
+.AddLogging(logging =>
 {
-    builder
-      .AddSimpleConsole(o => { o.IncludeScopes = true; o.TimestampFormat = "O "; o.SingleLine = true; })
-  .AddDebug()
-  .SetMinimumLevel(LogLevel.Trace)
-  .AddFilter("Microsoft", LogLevel.Debug)
-  .AddFilter("Microsoft.AspNetCore", LogLevel.Debug)
-  .AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Trace)
-  .AddFilter("System.Net.Http.HttpClient", LogLevel.Information);
+    logging.ClearProviders();
+    logging.AddSimpleConsole(o =>
+    {
+        o.IncludeScopes = false;
+        o.TimestampFormat = "HH:mm:ss ";
+        o.SingleLine = true;
+    });
+    logging.SetMinimumLevel(LogLevel.Information);
+    logging.AddFilter("Microsoft", LogLevel.Warning);
+    logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+    logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 });
 
 
@@ -103,12 +106,9 @@ var reqLogger =
 
 app.Use(async (ctx, next) =>
 {
-    var sw = System.Diagnostics.Stopwatch.StartNew();
     try
     {
         await next();
-        reqLogger.LogInformation("HTTP {method} {path} -> {status} in {elapsed} ms",
-          ctx.Request.Method, ctx.Request.Path, ctx.Response.StatusCode, sw.ElapsedMilliseconds);
     }
     catch (Exception ex)
     {
@@ -128,7 +128,7 @@ app
     .Lifetime
     .ApplicationStarted
     .Register(() =>
-        lifecycleLogger.LogWarning("ApplicationStarted. PID={pid}, ENV={env}, Version={ver}",
+        lifecycleLogger.LogInformation("ApplicationStarted. PID={pid}, ENV={env}, Version={ver}",
             Environment.ProcessId,
             app.Environment.EnvironmentName,
             versionForLog));
@@ -137,19 +137,19 @@ app
     .Lifetime
     .ApplicationStopping
     .Register(() =>
-        lifecycleLogger.LogCritical("ApplicationStopping (SIGTERM likely). Dumping basic info..."));
+        lifecycleLogger.LogInformation("ApplicationStopping (SIGTERM likely)"));
 
 app
     .Lifetime
     .ApplicationStopped
     .Register(() =>
-        lifecycleLogger.LogCritical("ApplicationStopped"));
+        lifecycleLogger.LogInformation("ApplicationStopped"));
 
 AppDomain.CurrentDomain.ProcessExit += (_, __) =>
-  lifecycleLogger.LogCritical("ProcessExit fired");
+  lifecycleLogger.LogInformation("ProcessExit fired");
 
 Console.CancelKeyPress += (_, e) =>
-  lifecycleLogger.LogCritical("CancelKeyPress: {key}, Cancel={cancel}", e.SpecialKey, e.Cancel);
+  lifecycleLogger.LogInformation("CancelKeyPress: {key}, Cancel={cancel}", e.SpecialKey, e.Cancel);
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
