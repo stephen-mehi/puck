@@ -54,19 +54,27 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PAT }}
   
       - name: Build & Push Docker image (SHA + timestamp)
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           $sha    = "${{ github.sha }}"
           $short  = $sha.Substring(0,7)
           $stamp  = Get-Date -Format 'yyyyMMddHHmmss'
           $repo   = 'smehi/puck'
-          $shaTag = "$repo:$sha"
-          $nice   = "$repo:$short-$stamp"
-  
+      
+          # Either interpolate safely with $()...
+          $shaTag = "$($repo):$sha"
+          $nice   = "$($repo):$short-$stamp"
+      
+          # ...or use -f formatting:
+          # $shaTag = '{0}:{1}' -f $repo, $sha
+          # $nice   = '{0}:{1}-{2}' -f $repo, $short, $stamp
+      
           Write-Host "Building $shaTag and $nice"
           docker build -t "$shaTag" -t "$nice" .
           docker push "$shaTag"
           docker push "$nice"
+
 
 
   deploy:
