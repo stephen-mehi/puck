@@ -11,47 +11,47 @@ jobs:
   build:
     runs-on: self-hosted
     steps:
-    - uses: actions/checkout@v4 # Checkout the repository code
-    
-    - name: Setup .NET Core SDK  # Set up .NET Core SDK
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '9.0.x'
-        
-    - name: Restore dependencies  # Restore project dependencies
-      run: dotnet restore
+      - uses: actions/checkout@v4
 
-    - name: Build application  # Build the ASP.NET Core application
-      run: dotnet build --configuration Release
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+          cache: true
 
-    - name: Run tests  # Run tests (if applicable)
-      run: dotnet test
-      
-    - name: Build the Docker image
-      run: |
-        $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
-        Write-Output $tag
-        docker build -t $tag .
-        
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build application
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test --no-build --configuration Release
+
+      - name: Build the Docker image (local only)
+        shell: pwsh
+        run: |
+          $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          Write-Output $tag
+          docker build -t $tag .
+
   docker:
-    runs-on: self-hosted  # Specify the runner environment
-
-    needs: build  # Ensure that the 'build' job completes successfully before starting this job
+    runs-on: self-hosted
+    needs: build
+    if: github.event_name == 'push'   # don't push images for PRs
     outputs:
       full_tag: ${{ steps.build_push.outputs.full_tag }}
-
     steps:
-      - name: Checkout code  # Checkout the repository code
-        uses: actions/checkout@v4
-        
+      - uses: actions/checkout@v4
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_UN }}
           password: ${{ secrets.DOCKERHUB_PAT }}
-          
+
       - id: build_push
-        name: Build & Push Docker image  # Build Docker image
+        name: Build & Push Docker image
         shell: pwsh
         run: |
           $tag = "$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
@@ -59,7 +59,7 @@ jobs:
           Write-Output "Building $full"
           docker build -t "$full" .
           docker push "$full"
-          echo "full_tag=$full" >> $env:GITHUB_OUTPUT
+          "full_tag=$full" >> $env:GITHUB_OUTPUT
 
   deploy:
     name: kubernetes deploy
@@ -67,14 +67,16 @@ jobs:
       name: dev
     runs-on: self-hosted
     needs: docker
-    
+    if: github.event_name == 'push'   # don't deploy on PRs
     steps:
-    - name: Kubectl tool installer
-      uses: Azure/setup-kubectl@v3
-  
-    - name: Update image to new tag
-      shell: pwsh
-      run: |
-        kubectl set image deployment/puck-app puck=${{ needs.docker.outputs.full_tag }} --record --kubeconfig=$HOME\.kube\config\client.config
-        kubectl rollout status deployment/puck-app --timeout=60s --kubeconfig=$HOME\.kube\config\client.config
-      
+      - name: Kubectl tool installer
+        uses: Azure/setup-kubectl@v3
+        with:
+          version: 'v1.30.0'  # pin a version you support
+
+      - name: Update image to new tag
+        shell: pwsh
+        run: |
+          $kube = "$HOME\.kube\config\client.config"
+          kubectl --kubeconfig $kube set image deployment/puck-app puck=${{ needs.docker.outputs.full_tag }} --record
+          kubectl --kubeconfig $kube rollout status deployment/puck-app --timeout=60s
