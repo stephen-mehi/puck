@@ -95,54 +95,39 @@ jobs:
         uses: Azure/setup-kubectl@v3
         with:
           version: 'v1.30.0'
-
-      - name: Inspect kube dir (debug)
-        shell: powershell
-        run: |
-          Write-Host "HOME=$HOME"
-          Write-Host "USERPROFILE=$env:USERPROFILE"
-          Get-ChildItem -Force -Recurse -Depth 2 "$HOME\.kube" | Select-Object FullName
-
+          
       - name: Sanity check image & container
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ([string]::IsNullOrWhiteSpace("${{ github.sha }}")) { throw "github.sha empty?" }
           $newImage = "smehi/puck:${{ github.sha }}"
           Write-Host "NEW_IMAGE = $newImage"
       
-          # Compute kubeconfig path at runtime (adjust if yours really uses client.config)
-          $kube = Join-Path $HOME ".kube\config"             # common default
-          # $kube = Join-Path $HOME ".kube\config\client.config"  # uncomment if that's your file
+          # Use the actual file under the config directory
+          $kube = Join-Path $HOME ".kube\config\client.config"
           if (-not (Test-Path $kube)) { throw "kubeconfig not found at $kube" }
+      
+          # Optional: verify the file is readable
+          kubectl --kubeconfig "$kube" config view 1>$null
       
           $container = kubectl --kubeconfig "$kube" get deploy puck-app -o jsonpath="{.spec.template.spec.containers[0].name}"
           if ([string]::IsNullOrWhiteSpace($container)) { throw "Could not read container name from Deployment puck-app" }
           Write-Host "Container name: $container"
       
-          # stash values for later steps
-          echo "NEW_IMAGE=$newImage"      >> $env:GITHUB_ENV
-          echo "KUBECONFIG_PATH=$kube"    >> $env:GITHUB_ENV
-          echo "CONTAINER_NAME=$container">> $env:GITHUB_ENV
-
-  
+          # Stash for later steps
+          "NEW_IMAGE=$newImage"       >> $env:GITHUB_ENV
+          "KUBECONFIG_PATH=$kube"     >> $env:GITHUB_ENV
+          "CONTAINER_NAME=$container" >> $env:GITHUB_ENV
+      
       - name: Update image to new tag
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           kubectl --kubeconfig "$env:KUBECONFIG_PATH" set image deploy/puck-app "$env:CONTAINER_NAME=$env:NEW_IMAGE"
-
+      
       - name: Wait for rollout
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           kubectl --kubeconfig "$env:KUBECONFIG_PATH" rollout status deploy/puck-app --timeout=5m
 
-      - name: Debug on failure
-        if: failure()
-        run: |
-          kubectl --kubeconfig $env:KUBECONFIG_PATH get deploy puck-app -o wide
-          kubectl --kubeconfig $env:KUBECONFIG_PATH describe deploy puck-app
-          kubectl --kubeconfig $env:KUBECONFIG_PATH get pods -l app=puck-app -o wide
-          kubectl --kubeconfig $env:KUBECONFIG_PATH describe pods -l app=puck-app
-          kubectl --kubeconfig $env:KUBECONFIG_PATH logs -l app=puck-app --tail=200 --all-containers=true
