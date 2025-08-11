@@ -40,12 +40,12 @@ jobs:
   docker:
     runs-on: self-hosted
     needs: build
-    if: github.event_name == 'push'   # don't push on PRs
+    if: github.event_name == 'push'
     defaults:
       run:
         shell: powershell
     outputs:
-      full_tag: ${{ steps.build_push.outputs.full_tag }}
+      full_tag: ${{ steps.build_and_push.outputs.full_tag }}   # <-- must match the step id
     steps:
       - uses: actions/checkout@v4
 
@@ -55,15 +55,26 @@ jobs:
           username: ${{ secrets.DOCKERHUB_UN }}
           password: ${{ secrets.DOCKERHUB_PAT }}
 
-      - id: build_push
+      - id: build_and_push                                   # <-- step id
         name: Build & Push Docker image
         run: |
-          $tag = "$((git rev-parse --short HEAD))-$((Get-Date -Format 'yyyyMMddHHmmss'))"
+          $ErrorActionPreference = 'Stop'
+          $short = git rev-parse --short HEAD
+          if ([string]::IsNullOrWhiteSpace($short)) { throw "git rev-parse returned empty" }
+          $tag  = "$short-$((Get-Date -Format 'yyyyMMddHHmmss'))"
           $full = "smehi/puck:$tag"
-          Write-Output "Building $full"
+          Write-Host "Building $full"
           docker build -t "$full" .
           docker push "$full"
-          "full_tag=$full" >> $env:GITHUB_OUTPUT
+
+          # Robust output publishing on Windows:
+          if (-not (Test-Path $env:GITHUB_OUTPUT)) { throw "GITHUB_OUTPUT not set" }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "full_tag=$full"
+
+      - name: Echo published output (debug)
+        run: |
+          Write-Host "full_tag from this job step context should be set now."
+
 
   deploy:
     name: kubernetes deploy
@@ -71,43 +82,41 @@ jobs:
       name: dev
     runs-on: self-hosted
     needs: docker
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && needs.docker.result == 'success'
     defaults:
       run:
         shell: powershell
     env:
-      NEW_IMAGE: ${{ needs.docker.outputs.full_tag }}   # <-- safe hand-off
+      NEW_IMAGE: ${{ needs.docker.outputs.full_tag }}
       KUBECONFIG_PATH: $HOME\.kube\config\client.config
     steps:
       - name: Kubectl tool installer
         uses: Azure/setup-kubectl@v3
         with:
           version: 'v1.30.0'
-  
+
       - name: Sanity check image & container
         run: |
           $ErrorActionPreference = 'Stop'
           if ([string]::IsNullOrWhiteSpace($env:NEW_IMAGE)) {
-            throw "NEW_IMAGE is empty. Did the docker job run and set its output?"
+            throw "NEW_IMAGE is empty. Upstream docker job did not publish full_tag."
           }
           Write-Host "NEW_IMAGE = $env:NEW_IMAGE"
           $container = kubectl --kubeconfig $env:KUBECONFIG_PATH get deploy puck-app -o jsonpath="{.spec.template.spec.containers[0].name}"
-          if ([string]::IsNullOrWhiteSpace($container)) {
-            throw "Could not read container name from Deployment puck-app"
-          }
-          Write-Host "Container name in deployment: $container"
-  
+          if ([string]::IsNullOrWhiteSpace($container)) { throw "Could not read container name from Deployment puck-app" }
+          Write-Host "Container name: $container"
+
       - name: Update image to new tag
         run: |
           $ErrorActionPreference = 'Stop'
           $container = kubectl --kubeconfig $env:KUBECONFIG_PATH get deploy puck-app -o jsonpath="{.spec.template.spec.containers[0].name}"
           kubectl --kubeconfig $env:KUBECONFIG_PATH set image deploy/puck-app "$container=$env:NEW_IMAGE"
-  
+
       - name: Wait for rollout
         run: |
           $ErrorActionPreference = 'Stop'
           kubectl --kubeconfig $env:KUBECONFIG_PATH rollout status deploy/puck-app --timeout=5m
-  
+
       - name: Debug on failure
         if: failure()
         run: |
