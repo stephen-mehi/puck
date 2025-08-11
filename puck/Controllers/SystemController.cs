@@ -3,6 +3,7 @@ using System.IO.Ports;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Puck.Services;
+using puck.Services.PID;
 
 namespace Puck.Controllers;
 
@@ -28,6 +29,65 @@ public class SystemController : ControllerBase
         _proxy = proxy;
         _pauseCont = pauseCont;
         _runParamsRepo = runParamsRepo;
+    }
+
+    public record AutoTuneLiveRequest(
+        double? Dt,
+        int? Steps,
+        double? TargetPressureBar,
+        double? MaxSafePressureBar,
+        int? Generations,
+        int? PopulationSize,
+        double? KpMin,
+        double? KpMax,
+        double? KiMin,
+        double? KiMax,
+        double? KdMin,
+        double? KdMax
+    );
+
+    [ApiController]
+    [Route("[controller]/autotune")] 
+    public class AutoTuneController : ControllerBase
+    {
+        private readonly SystemProxy _proxy;
+
+        public AutoTuneController(SystemProxy proxy)
+        {
+            _proxy = proxy;
+        }
+
+        [HttpPost("live")] 
+        public async Task<IActionResult> PostAutoTuneLive([FromBody] AutoTuneLiveRequest req, CancellationToken ct = default)
+        {
+            var options = new GeneticPidTuner.GeneticTunerOptions
+            {
+                Generations = req.Generations ?? 5,
+                PopulationSize = req.PopulationSize ?? 8,
+                KpRange = (req.KpMin ?? 0.1, req.KpMax ?? 2.5),
+                KiRange = (req.KiMin ?? 0.1, req.KiMax ?? 2.5),
+                KdRange = (req.KdMin ?? 0.0, req.KdMax ?? 0.5),
+                EliteFraction = 0.25,
+                TournamentSize = 3,
+                EvaluateInParallel = false,
+                Patience = 5,
+                MinImprovement = 1e-3,
+                InitialMutationRate = 0.3,
+                FinalMutationRate = 0.1,
+                InitialMutationStrength = 0.25,
+                FinalMutationStrength = 0.1
+            };
+
+            var (kp, ki, kd) = await _proxy.AutoTunePidGeneticLiveAsync(
+                ct,
+                dt: req.Dt ?? 0.1,
+                steps: req.Steps ?? 120,
+                targetPressureBar: req.TargetPressureBar ?? 9.0,
+                maxSafePressureBar: req.MaxSafePressureBar ?? 12.0,
+                options: options);
+
+            return Ok(new { kp, ki, kd });
+        }
     }
 
     [HttpGet]
@@ -117,6 +177,8 @@ public class SystemController : ControllerBase
             throw new Exception("Run parameters id must be included in query string. Otherwise use endpoint that uses default run params");
 
         var runParams = _runParamsRepo.GetRunParametersById(runParamsId);
+        if (runParams == null)
+            return NotFound($"Run parameters not found for id '{runParamsId}'");
 
         await _proxy.RunAsync(runParams, ct);
         return Ok("Set to run");
@@ -130,6 +192,8 @@ public class SystemController : ControllerBase
         _logger.LogInformation("Posted run");
 
         var runParams = _runParamsRepo.GetActiveParameters();
+        if (runParams == null)
+            return BadRequest("No active run parameters are set");
 
         await _proxy.RunAsync(runParams, ct);
 

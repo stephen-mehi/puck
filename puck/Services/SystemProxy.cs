@@ -76,6 +76,14 @@ namespace Puck.Services
         GroupHead = 2
     }
 
+    public enum PressureUnit
+    {
+        Bar = 0,
+        Psi = 1,
+        KPa = 2
+    }
+
+
     // Add delta/action types and ValveType enum
     public enum ValveType { GroupHead, Backflush, Recirculation }
 
@@ -110,7 +118,6 @@ namespace Puck.Services
         private readonly RunParametersRepo _paramRepo;
         private readonly RunResultRepo _runRepo;
 
-        private Task? _scanTask;
         private bool _isDisposed;
         private IDisposable? _connectionSub;
 
@@ -133,11 +140,25 @@ namespace Puck.Services
         private readonly int _runStateMonitorDelayMs;
         private readonly double _pumpStopValue;
         private readonly int _setAllIdleRecircOpenDelayMs;
+        // Pressure IO configuration
+        private readonly PressureUnit _pressureUnit;
+        private readonly double _sensorMinPressure; // in Bar
+        private readonly double _sensorMaxPressure; // in Bar
+        private readonly double _sensorMinCurrentmA;
+        private readonly double _sensorMaxCurrentmA;
 
         private readonly Subject<SystemStateDelta> _stateDeltaSubject = new();
         private readonly BehaviorSubject<ProcessDeviceState> _stateSubject;
         public IObservable<ProcessDeviceState> StateObservable => _stateSubject.AsObservable();
 
+        // Auto-tune configuration/profile (constructed once)
+        private readonly double _autoTuneDt = 0.05;
+        private readonly int _autoTuneSteps = 600;
+        private readonly double[] _autoTuneSetpointProfile;
+
+        
+
+        // Overload: construct using options bag for all defaults
         public SystemProxy(
             ILogger<SystemService> logger,
             IPhoenixProxy ioProxy,
@@ -146,25 +167,7 @@ namespace Puck.Services
             PID pid,
             RunParametersRepo paramRepo,
             RunResultRepo runRepo,
-            // IO mapping
-            ushort recircValveIO = 1,
-            ushort groupheadValveIO = 2,
-            ushort backflushValveIO = 3,
-            ushort runStatusOutputIO = 4,
-            ushort runStatusInputIO = 1,
-            ushort pumpSpeedIO = 1,
-            ushort pressureIO = 1,
-            // Timing and control
-            int recircValveOpenDelayMs = 100,
-            int initialPumpSpeedDelayMs = 750,
-            int tempSettleTolerance = 2,
-            int tempSettleTimeoutSec = 30,
-            int pidLoopDelayMs = 500,
-            int mainScanLoopDelayMs = 250,
-            int runStateMonitorDelayMs = 250,
-            double pumpStopValue = 0,
-            int setAllIdleRecircOpenDelayMs = 250
-        )
+            SystemProxyConfiguration options)
         {
             _runRepo = runRepo;
             _paramRepo = paramRepo;
@@ -178,23 +181,28 @@ namespace Puck.Services
             _runScanLock = new SemaphoreSlim(1, 1);
             _ctSrc = new CancellationTokenSource();
             // IO mapping
-            _recircValveIO = recircValveIO;
-            _groupheadValveIO = groupheadValveIO;
-            _backflushValveIO = backflushValveIO;
-            _runStatusOutputIO = runStatusOutputIO;
-            _runStatusInputIO = runStatusInputIO;
-            _pumpSpeedIO = pumpSpeedIO;
-            _pressureIO = pressureIO;
+            _recircValveIO = options.RecircValveIO;
+            _groupheadValveIO = options.GroupheadValveIO;
+            _backflushValveIO = options.BackflushValveIO;
+            _runStatusOutputIO = options.RunStatusOutputIO;
+            _runStatusInputIO = options.RunStatusInputIO;
+            _pumpSpeedIO = options.PumpSpeedIO;
+            _pressureIO = options.PressureIO;
             // Timing and control
-            _recircValveOpenDelayMs = recircValveOpenDelayMs;
-            _initialPumpSpeedDelayMs = initialPumpSpeedDelayMs;
-            _tempSettleTolerance = tempSettleTolerance;
-            _tempSettleTimeoutSec = tempSettleTimeoutSec;
-            _pidLoopDelayMs = pidLoopDelayMs;
-            _mainScanLoopDelayMs = mainScanLoopDelayMs;
-            _runStateMonitorDelayMs = runStateMonitorDelayMs;
-            _pumpStopValue = pumpStopValue;
-            _setAllIdleRecircOpenDelayMs = setAllIdleRecircOpenDelayMs;
+            _recircValveOpenDelayMs = options.RecircValveOpenDelayMs;
+            _initialPumpSpeedDelayMs = options.InitialPumpSpeedDelayMs;
+            _tempSettleTolerance = options.TempSettleTolerance;
+            _tempSettleTimeoutSec = options.TempSettleTimeoutSec;
+            _pidLoopDelayMs = options.PidLoopDelayMs;
+            _mainScanLoopDelayMs = options.MainScanLoopDelayMs;
+            _runStateMonitorDelayMs = options.RunStateMonitorDelayMs;
+            _pumpStopValue = options.PumpStopValue;
+            _setAllIdleRecircOpenDelayMs = options.SetAllIdleRecircOpenDelayMs;
+            _pressureUnit = options.PressureUnit;
+            _sensorMinPressure = options.SensorMinPressureBar;
+            _sensorMaxPressure = options.SensorMaxPressureBar;
+            _sensorMinCurrentmA = options.SensorMinCurrentmA;
+            _sensorMaxCurrentmA = options.SensorMaxCurrentmA;
             _stateSubject = new BehaviorSubject<ProcessDeviceState>(GetInitialProcessDeviceState());
             _stateDeltaSubject.Subscribe(delta =>
             {
@@ -210,6 +218,9 @@ namespace Puck.Services
             });
             // Initialize connection state
             _stateDeltaSubject.OnNext(new ConnectionChanged(_ioProxy.IsCurrentlyConnected));
+
+            // Initialize default genetic auto-tune setpoint profile
+            _autoTuneSetpointProfile = BuildAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
         }
 
         private ProcessDeviceState GetInitialProcessDeviceState()
@@ -610,23 +621,6 @@ namespace Puck.Services
             return runState;
         }
 
-        private double MapValueToRange(
-            double value,
-            double sourceRangeMin,
-            double sourceRangeMax,
-            double targetRangeMin,
-            double targetRangeMax)
-        {
-            //map using y = mx + B where:
-            //m = (targetRangeMax - targetRangeMin)/(sourceRangeMax - sourceRangeMin)
-            //B = targetRangeMin
-            //x = value - sourceRangeMin 
-            //y = output
-            var y = (value - sourceRangeMin) * ((targetRangeMax - targetRangeMin) / (sourceRangeMax - sourceRangeMin)) + targetRangeMin;
-
-            return y;
-        }
-
         public RunState GetRunState()
         {
             //TODO: CHANGE THIS BACK TO DIGITAL INPUT ONCE CONNECTED TO HARDWARE
@@ -671,10 +665,30 @@ namespace Puck.Services
         public double? GetGroupHeadPressure()
         {
             var press = GetAnalogInputState(_pressureIO);
+            if (!press.HasValue)
+                return null;
 
-            //TODO: ADD BARR CONVERSION
+            double raw = press.Value.State;
 
-            return press.HasValue ? press.Value.State : null;
+            // Interpret analog input as current in mA and convert 4-20mA to pressure (Bar), then to target unit
+            double currentmA = raw;
+            // Clip current to expected range
+            double clipped = Math.Max(_sensorMinCurrentmA, Math.Min(_sensorMaxCurrentmA, currentmA));
+            double normalized = (clipped - _sensorMinCurrentmA) / (_sensorMaxCurrentmA - _sensorMinCurrentmA);
+            normalized = Math.Max(0.0, Math.Min(1.0, normalized));
+            double pressureBar = _sensorMinPressure + normalized * (_sensorMaxPressure - _sensorMinPressure);
+            return ConvertBarToUnit(pressureBar, _pressureUnit);
+        }
+
+        private static double ConvertBarToUnit(double valueBar, PressureUnit unit)
+        {
+            return unit switch
+            {
+                PressureUnit.Bar => valueBar,
+                PressureUnit.Psi => valueBar * 14.5037738,
+                PressureUnit.KPa => valueBar * 100.0,
+                _ => valueBar
+            };
         }
 
 
@@ -913,6 +927,333 @@ namespace Puck.Services
             _stateDeltaSubject.OnNext(new PausedChanged(isPaused));
         }
 
+        /// <summary>
+        /// Runs a genetic auto-tuning routine against a simulated PT1 process that maps pump speed (output)
+        /// to group head pressure (feedback). Uses a representative multi-step setpoint profile to optimize
+        /// PID gains for tracking performance. Applies the tuned gains to the internal PID and returns them.
+        /// Note: This routine does not actuate hardware; it simulates the plant.
+        /// </summary>
+        /// <param name="dt">Simulation time step in seconds</param>
+        /// <param name="steps">Number of simulation steps</param>
+        /// <param name="processGain">PT1 process gain used in simulation</param>
+        /// <param name="options">Genetic tuner options; defaults are applied if null</param>
+        /// <returns>(Kp, Ki, Kd) tuned gains that were applied to the internal PID</returns>
+        public async Task<(double Kp, double Ki, double Kd)> AutoTunePidGeneticAsync(
+            CancellationToken ct,
+            double dt = 0.05,
+            int steps = 600,
+            double processGain = 10.0,
+            GeneticPidTuner.GeneticTunerOptions? options = null)
+        {
+            // Ensure exclusive access to system operations during tuning
+            await _systemLock.WaitAsync(ct);
+
+            try
+            {
+                // Use prebuilt profile if dt/steps match; otherwise build a temporary one
+                var setpointProfile = (Math.Abs(dt - _autoTuneDt) < 1e-12 && steps == _autoTuneSteps)
+                    ? _autoTuneSetpointProfile
+                    : BuildAutoTuneSetpointProfile(dt, steps);
+
+                // Cost weights (mirrors test config, modest penalties for overshoot, favor steady-state accuracy)
+                double iaeWeight = 1.0;
+                double overshootWeight = 200.0;
+                double steadyStateWeight = 300.0;
+                double finalErrorWeight = 400.0;
+                int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
+
+                // PT1 process simulation (pump speed -> pressure). Clamp actuator to [0,1].
+                PidSimulationDelegate simDelegate = parameters =>
+                {
+                    double pressure = parameters.InitialProcessValue;
+
+                    var pid = new PID(
+                        kp: parameters.Kp,
+                        ki: parameters.Ki,
+                        kd: parameters.Kd,
+                        n: 10.0,
+                        outputUpperLimit: 1.0,
+                        outputLowerLimit: 0.0,
+                        tsMin: parameters.TimeStep,
+                        derivativeFilterAlpha: 0.2);
+
+                    double errorSum = 0;
+                    double maxOvershoot = 0;
+                    double steadyStateError = 0;
+                    double finalSteadyStateError = 0;
+                    double prevSp = double.NaN;
+                    int stepDir = 0; // +1 up, -1 down
+                    double[] errors = new double[steps];
+
+                    for (int i = 0; i < steps; i++)
+                    {
+                        double sp = setpointProfile[i];
+
+                        double output =
+                            pid
+                            .PID_iterate(sp, pressure, TimeSpan.FromSeconds(parameters.TimeStep));
+
+                        if (double.IsNaN(output) ||
+                            double.IsInfinity(output) ||
+                            double.IsNaN(pressure) ||
+                            double.IsInfinity(pressure))
+                        {
+                            return new PidSimulationResult { Cost = double.MaxValue };
+                        }
+
+                        // Actuator clamp 0..1
+                        double actuator = Math.Max(0.0, Math.Min(1.0, output));
+                        // PT1 update
+                        pressure += (processGain * (actuator - pressure)) * parameters.TimeStep;
+                        pressure = Math.Max(0.0, Math.Min(1.0, pressure));
+
+                        double err = Math.Abs(sp - pressure);
+                        errors[i] = err;
+                        errorSum += err * parameters.TimeStep;
+
+                        if (!double.IsNaN(prevSp) && Math.Abs(sp - prevSp) > 1e-9)
+                            stepDir = sp > prevSp ? 1 : -1;
+
+                        double overshoot = 0.0;
+
+                        if (stepDir > 0 && pressure > sp) overshoot = pressure - sp;
+                        else if (stepDir < 0 && pressure < sp) overshoot = sp - pressure;
+                        if (overshoot > maxOvershoot) maxOvershoot = overshoot;
+                        prevSp = sp;
+                    }
+
+                    for (int i = steps - steadyStateSamples; i < steps; i++)
+                        steadyStateError += errors[i];
+
+                    steadyStateError /= steadyStateSamples;
+
+                    for (int i = steps - 10; i < steps; i++)
+                        finalSteadyStateError += errors[i];
+
+                    finalSteadyStateError /= 10.0;
+
+                    double cost = iaeWeight * errorSum
+                                  + overshootWeight * maxOvershoot
+                                  + steadyStateWeight * steadyStateError
+                                  + finalErrorWeight * finalSteadyStateError;
+                    return new PidSimulationResult { Cost = cost };
+                };
+
+                var tuner = new GeneticPidTuner(seed: 42);
+                var baseParams = new PidSimulationParameters
+                {
+                    Setpoint = 1.0,
+                    SimulationTime = steps * dt,
+                    TimeStep = dt,
+                    InitialProcessValue = 0.0
+                };
+                options ??= new GeneticPidTuner.GeneticTunerOptions
+                {
+                    Generations = 250,
+                    PopulationSize = 120,
+                    KpRange = (0.1, 2.5),
+                    KiRange = (0.1, 2.5),
+                    KdRange = (0.0, 0.5),
+                    EliteFraction = 0.15,
+                    TournamentSize = 3,
+                    EvaluateInParallel = false,
+                    Patience = 80,
+                    MinImprovement = 1e-6,
+                    InitialMutationRate = 0.3,
+                    FinalMutationRate = 0.05,
+                    InitialMutationStrength = 0.3,
+                    FinalMutationStrength = 0.05
+                };
+
+                var (bestKp, bestKi, bestKd) = tuner.Tune(simDelegate, baseParams, options);
+
+                // Apply tuned gains and emit state change
+                _pid.SetGains(bestKp, bestKi, bestKd);
+                _stateDeltaSubject.OnNext(new PidParametersChanged(
+                    bestKp, bestKi, bestKd, _pid.N, _pid.OutputUpperLimit, _pid.OutputLowerLimit));
+
+                return (bestKp, bestKi, bestKd);
+            }
+            finally
+            {
+                _systemLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// Live genetic auto-tuning using actual IO: pump output as actuator and pressure sensor as feedback.
+        /// This method actuates the pump; ensure safe test conditions. Evaluation is serialized and non-parallel.
+        /// </summary>
+        public async Task<(double Kp, double Ki, double Kd)> AutoTunePidGeneticLiveAsync(
+            CancellationToken ct,
+            double dt = 0.1,
+            int steps = 120,
+            double targetPressureBar = 9.0,
+            double maxSafePressureBar = 12.0,
+            GeneticPidTuner.GeneticTunerOptions? options = null)
+        {
+            await _systemLock.WaitAsync(ct);
+
+            try
+            {
+                var setpointProfile = (Math.Abs(dt - _autoTuneDt) < 1e-12 && steps == _autoTuneSteps)
+                    ? _autoTuneSetpointProfile
+                    : BuildAutoTuneSetpointProfile(dt, steps);
+
+                double iaeWeight = 1.0;
+                double overshootWeight = 200.0;
+                double steadyStateWeight = 300.0;
+                double finalErrorWeight = 400.0;
+                int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
+
+                PidSimulationDelegate liveEvaluator = parameters =>
+                {
+                    try
+                    {
+                        // Apply candidate gains and reset controller state
+                        _pid.SetGains(parameters.Kp, parameters.Ki, parameters.Kd);
+                        _pid.ResetController();
+
+                        double errorSum = 0;
+                        double maxOvershoot = 0;
+                        double steadyStateError = 0;
+                        double finalSteadyStateError = 0;
+                        double prevSp = double.NaN;
+                        int stepDir = 0;
+                        double[] errors = new double[steps];
+
+                        DateTime prevTime = DateTime.UtcNow;
+
+                        for (int i = 0; i < steps; i++)
+                        {
+                            if (ct.IsCancellationRequested)
+                                return new PidSimulationResult { Cost = double.MaxValue };
+
+                            double sp = setpointProfile[i] * targetPressureBar;
+                            double? p = GetGroupHeadPressure();
+                            if (!p.HasValue)
+                                return new PidSimulationResult { Cost = double.MaxValue };
+
+                            if (p.Value > maxSafePressureBar)
+                            {
+                                try { StopPumpInternalAsync(ct).GetAwaiter().GetResult(); } catch { }
+                                return new PidSimulationResult { Cost = double.MaxValue };
+                            }
+
+                            var now = DateTime.UtcNow;
+                            double u = _pid.PID_iterate(sp, p.Value, now - prevTime);
+                            prevTime = now;
+                            double clampedU = Math.Max(_pid.OutputLowerLimit, Math.Min(_pid.OutputUpperLimit, u));
+                            ApplyPumpSpeedInternalAsync(clampedU, ct).GetAwaiter().GetResult();
+
+                            // wait for next sample
+                            try { Task.Delay(TimeSpan.FromSeconds(dt), ct).Wait(ct); }
+                            catch { return new PidSimulationResult { Cost = double.MaxValue }; }
+
+                            p = GetGroupHeadPressure();
+                            if (!p.HasValue)
+                                return new PidSimulationResult { Cost = double.MaxValue };
+
+                            double e = Math.Abs(sp - p.Value);
+                            errors[i] = e;
+                            errorSum += e * dt;
+
+                            if (!double.IsNaN(prevSp) && Math.Abs(sp - prevSp) > 1e-9)
+                                stepDir = sp > prevSp ? 1 : -1;
+                            double overshoot = 0.0;
+                            if (stepDir > 0 && p.Value > sp) overshoot = p.Value - sp;
+                            else if (stepDir < 0 && p.Value < sp) overshoot = sp - p.Value;
+                            if (overshoot > maxOvershoot) maxOvershoot = overshoot;
+                            prevSp = sp;
+                        }
+
+                        for (int i = steps - steadyStateSamples; i < steps; i++)
+                            steadyStateError += errors[i];
+                        steadyStateError /= steadyStateSamples;
+                        for (int i = steps - 10; i < steps; i++)
+                            finalSteadyStateError += errors[i];
+                        finalSteadyStateError /= 10.0;
+
+                        double cost = iaeWeight * errorSum
+                                      + overshootWeight * maxOvershoot
+                                      + steadyStateWeight * steadyStateError
+                                      + finalErrorWeight * finalSteadyStateError;
+                        return new PidSimulationResult { Cost = cost };
+                    }
+                    catch
+                    {
+                        return new PidSimulationResult { Cost = double.MaxValue };
+                    }
+                };
+
+                var tuner = new GeneticPidTuner(seed: 42);
+                var baseParams = new PidSimulationParameters
+                {
+                    Setpoint = targetPressureBar,
+                    SimulationTime = steps * dt,
+                    TimeStep = dt,
+                    InitialProcessValue = GetGroupHeadPressure() ?? 0.0
+                };
+                options ??= new GeneticPidTuner.GeneticTunerOptions
+                {
+                    Generations = 5,
+                    PopulationSize = 8,
+                    KpRange = (0.1, 2.5),
+                    KiRange = (0.1, 2.5),
+                    KdRange = (0.0, 0.5),
+                    EliteFraction = 0.25,
+                    TournamentSize = 3,
+                    EvaluateInParallel = false,
+                    Patience = 5,
+                    MinImprovement = 1e-3,
+                    InitialMutationRate = 0.3,
+                    FinalMutationRate = 0.1,
+                    InitialMutationStrength = 0.25,
+                    FinalMutationStrength = 0.1
+                };
+                options.EvaluateInParallel = false;
+
+                (double Kp, double Ki, double Kd) best;
+                try
+                {
+                    best = tuner.Tune(liveEvaluator, baseParams, options);
+                }
+                finally
+                {
+                    try { await StopPumpInternalAsync(ct); } catch { }
+                }
+
+                _pid.SetGains(best.Kp, best.Ki, best.Kd);
+                _stateDeltaSubject.OnNext(new PidParametersChanged(
+                    best.Kp, best.Ki, best.Kd, _pid.N, _pid.OutputUpperLimit, _pid.OutputLowerLimit));
+
+                return best;
+            }
+            finally
+            {
+                _systemLock.Release();
+            }
+        }
+
+        private static double[] BuildAutoTuneSetpointProfile(double dt, int steps)
+        {
+            var profile = new double[steps];
+            for (int i = 0; i < steps; i++)
+            {
+                double t = i * dt;
+                if (t < 5.0) profile[i] = 0.0;
+                else if (t < 15.0) profile[i] = 0.95;
+                else if (t < 25.0) profile[i] = 0.5;
+                else if (t < 35.0) profile[i] = 0.75;
+                else if (t < 45.0) profile[i] = 0.25;
+                else if (t < 55.0) profile[i] = 0.0;
+                else if (t < 65.0) profile[i] = 0.9;
+                else if (t < 75.0) profile[i] = 0.3;
+                else profile[i] = 0.7;
+            }
+            return profile;
+        }
+
         // Wrapper to set temperature and emit state changes
         private async Task SetTemperatureSynchronouslyAsync(
             TemperatureControllerId controllerId,
@@ -964,7 +1305,6 @@ namespace Puck.Services
             if (disposing)
             {
                 try { _ctSrc?.Cancel(); } catch (Exception) { }
-                try { _scanTask?.Wait(5000); } catch (Exception) { }
                 try { _ioProxy?.Dispose(); } catch (Exception) { }
                 try { _tempProxy[TemperatureControllerId.ThermoBlock]?.Dispose(); } catch (Exception) { }
                 try { _tempProxy[TemperatureControllerId.GroupHead]?.Dispose(); } catch (Exception) { }
@@ -987,5 +1327,81 @@ namespace Puck.Services
         }
 
         #endregion
+    }
+
+    public class SystemProxyConfiguration
+    {
+        // IO mapping
+        public ushort RecircValveIO { get; }
+        public ushort GroupheadValveIO { get; }
+        public ushort BackflushValveIO { get; }
+        public ushort RunStatusOutputIO { get; }
+        public ushort RunStatusInputIO { get; }
+        public ushort PumpSpeedIO { get; }
+        public ushort PressureIO { get; }
+
+        // Timing and control
+        public int RecircValveOpenDelayMs { get; }
+        public int InitialPumpSpeedDelayMs { get; }
+        public int TempSettleTolerance { get; }
+        public int TempSettleTimeoutSec { get; }
+        public int PidLoopDelayMs { get; }
+        public int MainScanLoopDelayMs { get; }
+        public int RunStateMonitorDelayMs { get; }
+        public double PumpStopValue { get; }
+        public int SetAllIdleRecircOpenDelayMs { get; }
+
+        // Pressure measurement (4–20 mA → Bar → selected unit)
+        public PressureUnit PressureUnit { get; }
+        public double SensorMinPressureBar { get; }
+        public double SensorMaxPressureBar { get; }
+        public double SensorMinCurrentmA { get; }
+        public double SensorMaxCurrentmA { get; }
+
+        public SystemProxyConfiguration(
+            ushort recircValveIO,
+            ushort groupheadValveIO,
+            ushort backflushValveIO,
+            ushort runStatusOutputIO,
+            ushort runStatusInputIO,
+            ushort pumpSpeedIO,
+            ushort pressureIO,
+            int recircValveOpenDelayMs,
+            int initialPumpSpeedDelayMs,
+            int tempSettleTolerance,
+            int tempSettleTimeoutSec,
+            int pidLoopDelayMs,
+            int mainScanLoopDelayMs,
+            int runStateMonitorDelayMs,
+            double pumpStopValue,
+            int setAllIdleRecircOpenDelayMs,
+            PressureUnit pressureUnit,
+            double sensorMinPressureBar,
+            double sensorMaxPressureBar,
+            double sensorMinCurrentmA,
+            double sensorMaxCurrentmA)
+        {
+            RecircValveIO = recircValveIO;
+            GroupheadValveIO = groupheadValveIO;
+            BackflushValveIO = backflushValveIO;
+            RunStatusOutputIO = runStatusOutputIO;
+            RunStatusInputIO = runStatusInputIO;
+            PumpSpeedIO = pumpSpeedIO;
+            PressureIO = pressureIO;
+            RecircValveOpenDelayMs = recircValveOpenDelayMs;
+            InitialPumpSpeedDelayMs = initialPumpSpeedDelayMs;
+            TempSettleTolerance = tempSettleTolerance;
+            TempSettleTimeoutSec = tempSettleTimeoutSec;
+            PidLoopDelayMs = pidLoopDelayMs;
+            MainScanLoopDelayMs = mainScanLoopDelayMs;
+            RunStateMonitorDelayMs = runStateMonitorDelayMs;
+            PumpStopValue = pumpStopValue;
+            SetAllIdleRecircOpenDelayMs = setAllIdleRecircOpenDelayMs;
+            PressureUnit = pressureUnit;
+            SensorMinPressureBar = sensorMinPressureBar;
+            SensorMaxPressureBar = sensorMaxPressureBar;
+            SensorMinCurrentmA = sensorMinCurrentmA;
+            SensorMaxCurrentmA = sensorMaxCurrentmA;
+        }
     }
 }

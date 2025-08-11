@@ -46,7 +46,30 @@ namespace Puck.Tests
 
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
-            return new SystemProxy(logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo);
+            return new SystemProxy(
+                logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
         }
 
         [Fact]
@@ -119,8 +142,9 @@ namespace Puck.Tests
             var proxy = CreateSystemProxy(out _, out _, out _);
             var cts = new CancellationTokenSource();
             // Simulate run lock already taken
-            typeof(SystemProxy).GetField("_runLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(proxy, new SemaphoreSlim(0, 1));
+            var runLockField = typeof(SystemProxy).GetField("_runLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(runLockField);
+            runLockField!.SetValue(proxy, new SemaphoreSlim(0, 1));
             await Assert.ThrowsAsync<Exception>(() => proxy.RunAsync(new RunParameters(), cts.Token));
         }
 
@@ -129,9 +153,9 @@ namespace Puck.Tests
         {
             var proxy = CreateSystemProxy(out _, out _, out _);
             var cts = new CancellationTokenSource();
-            typeof(SystemProxy)
-                .GetField("_runLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                .SetValue(proxy, new SemaphoreSlim(0, 1));
+            var runLockField = typeof(SystemProxy).GetField("_runLock", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            Assert.NotNull(runLockField);
+            runLockField!.SetValue(proxy, new SemaphoreSlim(0, 1));
 
             await Assert.ThrowsAsync<Exception>(() => proxy.ApplyPumpSpeedAsync(5.0, cts.Token));
         }
@@ -150,30 +174,84 @@ namespace Puck.Tests
         }
 
         [Fact]
-        public void GetValveState_ReturnsExpectedState()
+        public async Task GetValveState_ReturnsExpectedState()
         {
             var proxy = CreateSystemProxy(out var phoenixMock, out _, out _);
-            phoenixMock.SetDigitalOutputStateAsync(1, true, CancellationToken.None).Wait();
+            await phoenixMock.SetDigitalOutputStateAsync(1, true, CancellationToken.None);
             Assert.Equal(ValveState.Open, proxy.GetRecirculationValveState());
 
-            phoenixMock.SetDigitalOutputStateAsync(1, false, CancellationToken.None).Wait();
+            await phoenixMock.SetDigitalOutputStateAsync(1, false, CancellationToken.None);
             Assert.Equal(ValveState.Closed, proxy.GetRecirculationValveState());
         }
 
         [Fact]
-        public void GetPumpSpeedSetting_ReturnsExpectedValue()
+        public async Task GetPumpSpeedSetting_ReturnsExpectedValue()
         {
             var proxy = CreateSystemProxy(out var phoenixMock, out _, out _);
-            phoenixMock.SetAnalogOutputStateAsync(1, 42.0, CancellationToken.None).Wait();
+            await phoenixMock.SetAnalogOutputStateAsync(1, 42.0, CancellationToken.None);
             Assert.Equal(42.0, proxy.GetPumpSpeedSetting());
         }
 
         [Fact]
         public void GetGroupHeadPressure_ReturnsExpectedValue()
         {
-            var proxy = CreateSystemProxy(out var phoenixMock, out _, out _);
-            phoenixMock.SetAnalogInput(1, 9.5);
-            Assert.Equal(9.5, proxy.GetGroupHeadPressure());
+            // Arrange
+            var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
+            {
+                { TemperatureControllerId.GroupHead, new MockTemperatureController() },
+                { TemperatureControllerId.ThermoBlock, new MockTemperatureController() }
+            };
+            var ioMock = new MockPhoenixProxy(
+                digitalInputs: new ushort[] { 1, 2, 3, 4 },
+                digitalOutputs: new ushort[] { 1, 2, 3, 4 },
+                analogInputs: new ushort[] { 1 },
+                analogOutputs: new ushort[] { 1 });
+            // Simulate 12 mA mid-range current (halfway between 4 and 20 mA)
+            ioMock.SetAnalogInput(1, 12.0);
+            var pauseCont = new PauseContainer();
+            var pid = new PID(
+                kp: 1,
+                ki: 1,
+                kd: 1,
+                n: 1,
+                outputUpperLimit: 1,
+                outputLowerLimit: 0);
+            var paramRepo = new RunParametersRepo();
+            var runRepo = new RunResultRepo();
+            var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
+            var logger = new Moq.Mock<ILogger<SystemService>>().Object;
+            // Configure SystemProxy for PSI, -14.5 to 362.5 psi range
+            var proxy = new SystemProxy(
+                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
+
+            // Act
+            var psi = proxy.GetGroupHeadPressure();
+
+            // Expect halfway between -14.5 and 362.5 psi ≈ 174.0 psi
+            Assert.True(psi.HasValue);
+            Assert.InRange(psi!.Value, 170.0, 178.0);
         }
 
         [Fact]
@@ -215,24 +293,47 @@ namespace Puck.Tests
                 outputLowerLimit: 0);
             var paramRepo = new RunParametersRepo();
             var runRepo = new RunResultRepo();
-            var proxy2 = new SystemProxy(logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo);
+            var proxy2 = new SystemProxy(
+                logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
             Assert.Throws<Exception>(() => proxy2.GetRunState());
         }
 
         [Fact]
         public async Task GetSystemState_ReturnsExpectedState_NormalOperation()
         {
-            // Arrange
+            // Arrange: create proxy and drive state only via SystemProxy
             var tempMocks = new Dictionary<TemperatureControllerId, MockTemperatureController>
             {
                 { TemperatureControllerId.GroupHead, new MockTemperatureController() },
                 { TemperatureControllerId.ThermoBlock, new MockTemperatureController() }
             };
-            tempMocks[TemperatureControllerId.GroupHead].SetProcessValue(93);
-            tempMocks[TemperatureControllerId.ThermoBlock].SetProcessValue(120);
-
-            var ioMock = new MockPhoenixProxy(analogInputs: new ushort[] { 1 });
-            ioMock.SetAnalogInput(1, 9.5); // Set pressure
+            var ioMock = new MockPhoenixProxy(
+                digitalInputs: new ushort[] { 1, 2, 3, 4 },
+                digitalOutputs: new ushort[] { 1, 2, 3, 4 },
+                analogInputs: new ushort[] { 1 },
+                analogOutputs: new ushort[] { 1 });
             var pauseCont = new PauseContainer();
             var pid = new PID(
                 kp: 1,
@@ -245,18 +346,47 @@ namespace Puck.Tests
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
-            var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
+            var proxy = new SystemProxy(
+                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
 
-            // Simulate valve and run state if needed
+            // Drive system behavior through SystemProxy
+            await proxy.RunAsync(new RunParameters(), CancellationToken.None);
+            await proxy.SetGroupHeadValveStateOpenAsync(CancellationToken.None);
+            await proxy.SetRecirculationValveStateClosedAsync(CancellationToken.None);
+            await proxy.SetBackFlushValveStateClosedAsync(CancellationToken.None);
+            await proxy.ApplyPumpSpeedAsync(42.0, CancellationToken.None);
+
             var state = await proxy.GetSystemStateAsync();
 
-            // Assert
-            Assert.Equal(93, state.GroupHeadTemperature);
-            Assert.Equal(120, state.ThermoblockTemperature);
-            Assert.False(state.GroupHeadHeaterEnabled); // Placeholder
-            Assert.False(state.ThermoblockHeaterEnabled); // Placeholder
-            Assert.True(state.IsIoBusConnected); // ioMock is not null
-            Assert.Equal(9.5, state.GroupHeadPressure);
+            // Assert: fields controlled via SystemProxy
+            Assert.True(state.IsIoBusConnected);
+            Assert.Equal(RunState.Run, state.RunState);
+            Assert.Equal(ValveState.Open, state.GroupHeadValveState);
+            Assert.Equal(ValveState.Closed, state.RecirculationValveState);
+            Assert.Equal(ValveState.Closed, state.BackflushValveState);
+            Assert.Equal(42.0, state.PumpSpeed);
         }
 
         [Fact]
@@ -271,7 +401,7 @@ namespace Puck.Tests
             var ioMock = new MockPhoenixProxy(analogInputs: new ushort[] { 1 });
             ioMock.SetAnalogInput(1, 9.5);
             var pauseCont = new PauseContainer();
-            pauseCont.PauseAsync(System.Threading.CancellationToken.None).GetAwaiter().GetResult();
+            await pauseCont.PauseAsync(System.Threading.CancellationToken.None);
             var pid = new PID(
                 kp: 1,
                 ki: 1,
@@ -283,7 +413,30 @@ namespace Puck.Tests
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
-            var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
+            var proxy = new SystemProxy(
+                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
 
             // Act
             var state = await proxy.GetSystemStateAsync();
@@ -305,11 +458,11 @@ namespace Puck.Tests
             tempMocks[TemperatureControllerId.ThermoBlock].SetProcessValue(0);
 
             var ioMock = new MockPhoenixProxy(
-                digitalInputs: new ushort[] { 1, 2, 3 , 4 },
-                digitalOutputs: new ushort[] { 1, 2, 3 , 4 },
+                digitalInputs: new ushort[] { 1, 2, 3, 4 },
+                digitalOutputs: new ushort[] { 1, 2, 3, 4 },
                 analogInputs: new ushort[] { 1 },
                 analogOutputs: new ushort[] { 1 });
-            
+
             ioMock.SetAnalogInput(1, 9.5);
             var pauseCont = new PauseContainer();
             var pid = new PID(
@@ -323,7 +476,30 @@ namespace Puck.Tests
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
-            var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
+            var proxy = new SystemProxy(
+                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
 
             // Act
             var state = await proxy.GetSystemStateAsync();
@@ -363,7 +539,30 @@ namespace Puck.Tests
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
-            var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
+            var proxy = new SystemProxy(
+                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
 
             // Act
             var state = await proxy.GetSystemStateAsync();
@@ -402,7 +601,30 @@ namespace Puck.Tests
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
-            var proxy = new SystemProxy(logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo);
+            var proxy = new SystemProxy(
+                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                new SystemProxyConfiguration(
+                    recircValveIO: 1,
+                    groupheadValveIO: 2,
+                    backflushValveIO: 3,
+                    runStatusOutputIO: 4,
+                    runStatusInputIO: 1,
+                    pumpSpeedIO: 1,
+                    pressureIO: 1,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0));
 
             // Act
             var state = await proxy.GetSystemStateAsync();
@@ -451,7 +673,28 @@ namespace Puck.Tests
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
                 logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
-                recircValveIO, groupheadValveIO, backflushValveIO, runStatusOutputIO, runStatusInputIO, pumpSpeedIO, pressureIO
+                new SystemProxyConfiguration(
+                    recircValveIO: recircValveIO,
+                    groupheadValveIO: groupheadValveIO,
+                    backflushValveIO: backflushValveIO,
+                    runStatusOutputIO: runStatusOutputIO,
+                    runStatusInputIO: runStatusInputIO,
+                    pumpSpeedIO: pumpSpeedIO,
+                    pressureIO: pressureIO,
+                    recircValveOpenDelayMs: 100,
+                    initialPumpSpeedDelayMs: 750,
+                    tempSettleTolerance: 2,
+                    tempSettleTimeoutSec: 30,
+                    pidLoopDelayMs: 500,
+                    mainScanLoopDelayMs: 250,
+                    runStateMonitorDelayMs: 250,
+                    pumpStopValue: 0.0,
+                    setAllIdleRecircOpenDelayMs: 250,
+                    pressureUnit: PressureUnit.Psi,
+                    sensorMinPressureBar: -1.0,
+                    sensorMaxPressureBar: 25.0,
+                    sensorMinCurrentmA: 4.0,
+                    sensorMaxCurrentmA: 20.0)
             );
 
             // Set up run parameters for a quick run
@@ -529,7 +772,7 @@ namespace Puck.Tests
             var fileName = $"ProcessDeviceStates.csv";
             var filePath = Path.Combine(Directory.GetCurrentDirectory(), fileName);
             File.WriteAllText(filePath, sb.ToString());
-            return filePath;
+            return filePath ?? string.Empty;
         }
         private static string FormatCsvValue(object? value)
         {
@@ -537,7 +780,7 @@ namespace Puck.Tests
             var str = value.ToString();
             if (str != null && (str.Contains(",") || str.Contains("\"")))
                 return $"\"{str.Replace("\"", "\"\"")}";
-            return str;
+            return str ?? string.Empty;
         }
     }
 }
