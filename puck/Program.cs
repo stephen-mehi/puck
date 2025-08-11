@@ -23,7 +23,7 @@ var runParams =
 builder
     .Services
     .AddSingleton<ITcpIOBusConnectionFactory, PhoenixIOBusConnectionFactory>()
-    .AddSingleton<PhoenixProxy>()
+    .AddSingleton<IPhoenixProxy, PhoenixProxy>()
     .AddSingleton<FujiPXFDriverProvider>()
     .AddSingleton<TemperatureControllerConfiguration>()
     .AddSingleton<TemperatureControllerContainer>()
