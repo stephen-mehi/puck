@@ -118,16 +118,23 @@ jobs:
           "NEW_IMAGE=$newImage"       >> $env:GITHUB_ENV
           "KUBECONFIG_PATH=$kube"     >> $env:GITHUB_ENV
           "CONTAINER_NAME=$container" >> $env:GITHUB_ENV
+
+      - name: Delete old deployment
+        continue-on-error: true
+        run: kubectl delete deployment puck-app --kubeconfig=$HOME\.kube\config\client.config
+  
+      - name: Wait For Deployment To Stop
+        run: Start-Sleep -Seconds 12
       
       - name: Update image to new tag
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           kubectl --kubeconfig "$env:KUBECONFIG_PATH" set image deploy/puck-app "$env:CONTAINER_NAME=$env:NEW_IMAGE"
+
+      - name: Apply pods
+        run: kubectl apply -f puck-deploy.yaml --kubeconfig "$env:KUBECONFIG_PATH"
       
-      - name: Wait for rollout
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          kubectl --kubeconfig "$env:KUBECONFIG_PATH" rollout status deploy/puck-app --timeout=5m
+      - name: Wait For Deployment To Start
+        run: Start-Sleep -Seconds 10
 
