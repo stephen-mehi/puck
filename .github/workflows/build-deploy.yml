@@ -37,6 +37,8 @@ jobs:
     runs-on: self-hosted  # Specify the runner environment
 
     needs: build  # Ensure that the 'build' job completes successfully before starting this job
+    outputs:
+      full_tag: ${{ steps.build_push.outputs.full_tag }}
 
     steps:
       - name: Checkout code  # Checkout the repository code
@@ -48,16 +50,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_UN }}
           password: ${{ secrets.DOCKERHUB_PAT }}
           
-      - name: Build Docker image  # Build Docker image
+      - id: build_push
+        name: Build & Push Docker image  # Build Docker image
+        shell: pwsh
         run: |
-          $tag = "puck:$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
-          Write-Output $tag
-          docker build -t "smehi/$tag" .
-          docker push "smehi/$tag"
-
-          $content = Get-Content -Path "C:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml" -Raw
-          $newContent = $content -replace "puck:latest", $tag
-          $newContent | Set-Content -Path "C:\Windows\System32\actions-runner\_work\puck\puck\puck-deploy.yaml"
+          $tag = "$(& git rev-parse --short HEAD)-$(Get-Date -Format 'yyyyMMddHHmmss')"
+          $full = "smehi/puck:$tag"
+          Write-Output "Building $full"
+          docker build -t "$full" .
+          docker push "$full"
+          echo "full_tag=$full" >> $env:GITHUB_OUTPUT
 
   deploy:
     name: kubernetes deploy
@@ -70,19 +72,9 @@ jobs:
     - name: Kubectl tool installer
       uses: Azure/setup-kubectl@v3
   
-    - name: Delete old deployment
-      continue-on-error: true
-      run: kubectl delete deployment puck-app --kubeconfig=$HOME\.kube\config\client.config
-
-    - name: Wait For Deployment To Start
-      run: Start-Sleep -Seconds 12
-      
-    - name: Apply pods
-      run: kubectl apply -f puck-deploy.yaml --kubeconfig=$HOME\.kube\config\client.config
-    
-    - name: Wait For Deployment To Start
-      run: Start-Sleep -Seconds 10
-      
-    - name: Wait For Pods To Start
-      run: kubectl wait --for=condition=ready pod -l app=puck --timeout=1m --kubeconfig=$HOME\.kube\config\client.config
+      - name: Update image to new tag
+        shell: pwsh
+        run: |
+          kubectl set image deployment/puck-app puck=${{ needs.docker.outputs.full_tag }} --record --kubeconfig=$HOME\.kube\config\client.config
+          kubectl rollout status deployment/puck-app --timeout=60s --kubeconfig=$HOME\.kube\config\client.config
       
