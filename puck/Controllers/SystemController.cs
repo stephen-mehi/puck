@@ -8,49 +8,49 @@ using static Puck.Controllers.SystemController;
 
 namespace Puck.Controllers;
 
-[ApiController]
-[Route("[controller]/autotune")]
-public class AutoTuneController : ControllerBase
-{
-    private readonly SystemProxy _proxy;
+//[ApiController]
+//[Route("[controller]/autotune")]
+//public class AutoTuneController : ControllerBase
+//{
+//    private readonly SystemProxy _proxy;
 
-    public AutoTuneController(SystemProxy proxy)
-    {
-        _proxy = proxy;
-    }
+//    public AutoTuneController(SystemProxy proxy)
+//    {
+//        _proxy = proxy;
+//    }
 
-    [HttpPost("live")]
-    public async Task<IActionResult> PostAutoTuneLive([FromBody] AutoTuneLiveRequest req, CancellationToken ct = default)
-    {
-        var options = new GeneticPidTuner.GeneticTunerOptions
-        {
-            Generations = req.Generations ?? 5,
-            PopulationSize = req.PopulationSize ?? 8,
-            KpRange = (req.KpMin ?? 0.1, req.KpMax ?? 2.5),
-            KiRange = (req.KiMin ?? 0.1, req.KiMax ?? 2.5),
-            KdRange = (req.KdMin ?? 0.0, req.KdMax ?? 0.5),
-            EliteFraction = 0.25,
-            TournamentSize = 3,
-            EvaluateInParallel = false,
-            Patience = 5,
-            MinImprovement = 1e-3,
-            InitialMutationRate = 0.3,
-            FinalMutationRate = 0.1,
-            InitialMutationStrength = 0.25,
-            FinalMutationStrength = 0.1
-        };
+//    [HttpPost("live")]
+//    public async Task<IActionResult> PostAutoTuneLive([FromBody] AutoTuneLiveRequest req, CancellationToken ct = default)
+//    {
+//        var options = new GeneticPidTuner.GeneticTunerOptions
+//        {
+//            Generations = req.Generations ?? 5,
+//            PopulationSize = req.PopulationSize ?? 8,
+//            KpRange = (req.KpMin ?? 0.1, req.KpMax ?? 2.5),
+//            KiRange = (req.KiMin ?? 0.1, req.KiMax ?? 2.5),
+//            KdRange = (req.KdMin ?? 0.0, req.KdMax ?? 0.5),
+//            EliteFraction = 0.25,
+//            TournamentSize = 3,
+//            EvaluateInParallel = false,
+//            Patience = 5,
+//            MinImprovement = 1e-3,
+//            InitialMutationRate = 0.3,
+//            FinalMutationRate = 0.1,
+//            InitialMutationStrength = 0.25,
+//            FinalMutationStrength = 0.1
+//        };
 
-        var (kp, ki, kd) = await _proxy.AutoTunePidGeneticLiveAsync(
-            ct,
-            dt: req.Dt ?? 0.1,
-            steps: req.Steps ?? 120,
-            targetPressureBar: req.TargetPressureBar ?? 9.0,
-            maxSafePressureBar: req.MaxSafePressureBar ?? 12.0,
-            options: options);
+//        var (kp, ki, kd) = await _proxy.AutoTunePidGeneticLiveAsync(
+//            ct,
+//            dt: req.Dt ?? 0.1,
+//            steps: req.Steps ?? 120,
+//            targetPressureBar: req.TargetPressureBar ?? 9.0,
+//            maxSafePressureBar: req.MaxSafePressureBar ?? 12.0,
+//            options: options);
 
-        return Ok(new { kp, ki, kd });
-    }
-}
+//        return Ok(new { kp, ki, kd });
+//    }
+//}
 
 [ApiController]
 [Route("[controller]")]

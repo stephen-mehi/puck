@@ -6,6 +6,17 @@ using puck.Services.PID;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Emit an early bootstrap marker so we can verify new images are running even before the host starts
+var asm = typeof(Program).Assembly;
+var asmVersion = asm.GetName().Version?.ToString() ?? "unknown";
+var asmInfoVersion = System.Reflection.Assembly
+    .GetExecutingAssembly()
+    .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+    .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+    .FirstOrDefault()?.InformationalVersion;
+var versionForLog = asmInfoVersion ?? asmVersion;
+Console.WriteLine($"DEPLOY_MARKER: Puck starting. Version={versionForLog} UTC={DateTime.UtcNow:o}");
+
 // Increase graceful shutdown time to allow logs to flush and cleanup to run during SIGTERM
 builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = System.TimeSpan.FromSeconds(30));
 
@@ -117,7 +128,10 @@ app
     .Lifetime
     .ApplicationStarted
     .Register(() =>
-        lifecycleLogger.LogWarning("ApplicationStarted. PID={pid}, ENV={env}", Environment.ProcessId, app.Environment.EnvironmentName));
+        lifecycleLogger.LogWarning("ApplicationStarted. PID={pid}, ENV={env}, Version={ver}",
+            Environment.ProcessId,
+            app.Environment.EnvironmentName,
+            versionForLog));
 
 app
     .Lifetime
