@@ -6,6 +6,9 @@ using puck.Services.PID;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Increase graceful shutdown time to allow logs to flush and cleanup to run during SIGTERM
+builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = System.TimeSpan.FromSeconds(30));
+
 //default run parameters
 var runParams =
     new RunParameters()
