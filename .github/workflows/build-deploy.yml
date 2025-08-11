@@ -75,14 +75,45 @@ jobs:
     defaults:
       run:
         shell: powershell
+    env:
+      NEW_IMAGE: ${{ needs.docker.outputs.full_tag }}   # <-- safe hand-off
+      KUBECONFIG_PATH: $HOME\.kube\config\client.config
     steps:
       - name: Kubectl tool installer
         uses: Azure/setup-kubectl@v3
         with:
-          version: 'v1.30.0'  # pin to a known-good version
-
+          version: 'v1.30.0'
+  
+      - name: Sanity check image & container
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:NEW_IMAGE)) {
+            throw "NEW_IMAGE is empty. Did the docker job run and set its output?"
+          }
+          Write-Host "NEW_IMAGE = $env:NEW_IMAGE"
+          $container = kubectl --kubeconfig $env:KUBECONFIG_PATH get deploy puck-app -o jsonpath="{.spec.template.spec.containers[0].name}"
+          if ([string]::IsNullOrWhiteSpace($container)) {
+            throw "Could not read container name from Deployment puck-app"
+          }
+          Write-Host "Container name in deployment: $container"
+  
       - name: Update image to new tag
         run: |
-          $kube = "$HOME\.kube\config\client.config"
-          kubectl --kubeconfig $kube set image deployment/puck-app puck=${{ needs.docker.outputs.full_tag }} --record
-          kubectl --kubeconfig $kube rollout status deployment/puck-app --timeout=60s
+          $ErrorActionPreference = 'Stop'
+          $container = kubectl --kubeconfig $env:KUBECONFIG_PATH get deploy puck-app -o jsonpath="{.spec.template.spec.containers[0].name}"
+          kubectl --kubeconfig $env:KUBECONFIG_PATH set image deploy/puck-app "$container=$env:NEW_IMAGE"
+  
+      - name: Wait for rollout
+        run: |
+          $ErrorActionPreference = 'Stop'
+          kubectl --kubeconfig $env:KUBECONFIG_PATH rollout status deploy/puck-app --timeout=5m
+  
+      - name: Debug on failure
+        if: failure()
+        run: |
+          kubectl --kubeconfig $env:KUBECONFIG_PATH get deploy puck-app -o wide
+          kubectl --kubeconfig $env:KUBECONFIG_PATH describe deploy puck-app
+          kubectl --kubeconfig $env:KUBECONFIG_PATH get pods -l app=puck-app -o wide
+          kubectl --kubeconfig $env:KUBECONFIG_PATH describe pods -l app=puck-app
+          kubectl --kubeconfig $env:KUBECONFIG_PATH logs -l app=puck-app --tail=200 --all-containers=true
+
