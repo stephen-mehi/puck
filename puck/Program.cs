@@ -59,8 +59,8 @@ builder
         pumpStopValue: 0.0,
         setAllIdleRecircOpenDelayMs: 250,
         pressureUnit: PressureUnit.Psi,
-        sensorMinPressureBar: -1.0,
-        sensorMaxPressureBar: 25.0,
+        sensorMinPressurePsi: 0,
+        sensorMaxPressurePsi: 150,
         sensorMinCurrentmA: 4.0,
         sensorMaxCurrentmA: 20.0))
     .AddSingleton<SystemProxy>()

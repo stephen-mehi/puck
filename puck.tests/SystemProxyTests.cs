@@ -66,8 +66,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: 0,
+                    sensorMaxPressurePsi: 150,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
         }
@@ -243,8 +243,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
 
@@ -315,8 +315,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
             Assert.Throws<Exception>(() => proxy2.GetRunState());
@@ -368,8 +368,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
 
@@ -435,8 +435,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
 
@@ -498,8 +498,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
 
@@ -561,8 +561,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
 
@@ -623,8 +623,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0));
 
@@ -693,8 +693,8 @@ namespace Puck.Tests
                     pumpStopValue: 0.0,
                     setAllIdleRecircOpenDelayMs: 250,
                     pressureUnit: PressureUnit.Psi,
-                    sensorMinPressureBar: -1.0,
-                    sensorMaxPressureBar: 25.0,
+                    sensorMinPressurePsi: -14.5037738,
+                    sensorMaxPressurePsi: 362.594345,
                     sensorMinCurrentmA: 4.0,
                     sensorMaxCurrentmA: 20.0)
             );

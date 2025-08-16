@@ -112,6 +112,14 @@ public class SystemController : ControllerBase
         return Ok(state);
     }
 
+    [HttpGet]
+    [Route("io/raw")]
+    public IActionResult GetRawIoState()
+    {
+        var raw = _proxy.GetRawIoState();
+        return Ok(raw);
+    }
+
     [HttpPost]
     [Route("run-status/idle")]
     public async Task<IActionResult> PostRunStatusIdle(CancellationToken ct = default)

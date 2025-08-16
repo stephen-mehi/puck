@@ -142,8 +142,8 @@ namespace Puck.Services
         private readonly int _setAllIdleRecircOpenDelayMs;
         // Pressure IO configuration
         private readonly PressureUnit _pressureUnit;
-        private readonly double _sensorMinPressure; // in Bar
-        private readonly double _sensorMaxPressure; // in Bar
+        private readonly double _sensorMinPressurePsi; // in PSI
+        private readonly double _sensorMaxPressurePsi; // in PSI
         private readonly double _sensorMinCurrentmA;
         private readonly double _sensorMaxCurrentmA;
 
@@ -199,8 +199,8 @@ namespace Puck.Services
             _pumpStopValue = options.PumpStopValue;
             _setAllIdleRecircOpenDelayMs = options.SetAllIdleRecircOpenDelayMs;
             _pressureUnit = options.PressureUnit;
-            _sensorMinPressure = options.SensorMinPressureBar;
-            _sensorMaxPressure = options.SensorMaxPressureBar;
+            _sensorMinPressurePsi = options.SensorMinPressurePsi;
+            _sensorMaxPressurePsi = options.SensorMaxPressurePsi;
             _sensorMinCurrentmA = options.SensorMinCurrentmA;
             _sensorMaxCurrentmA = options.SensorMaxCurrentmA;
             _stateSubject = new BehaviorSubject<ProcessDeviceState>(GetInitialProcessDeviceState());
@@ -676,18 +676,18 @@ namespace Puck.Services
             double clipped = Math.Max(_sensorMinCurrentmA, Math.Min(_sensorMaxCurrentmA, currentmA));
             double normalized = (clipped - _sensorMinCurrentmA) / (_sensorMaxCurrentmA - _sensorMinCurrentmA);
             normalized = Math.Max(0.0, Math.Min(1.0, normalized));
-            double pressureBar = _sensorMinPressure + normalized * (_sensorMaxPressure - _sensorMinPressure);
-            return ConvertBarToUnit(pressureBar, _pressureUnit);
+            double pressurePsi = _sensorMinPressurePsi + normalized * (_sensorMaxPressurePsi - _sensorMinPressurePsi);
+            return ConvertPsiToUnit(pressurePsi, _pressureUnit);
         }
 
-        private static double ConvertBarToUnit(double valueBar, PressureUnit unit)
+        private static double ConvertPsiToUnit(double valuePsi, PressureUnit unit)
         {
             return unit switch
             {
-                PressureUnit.Bar => valueBar,
-                PressureUnit.Psi => valueBar * 14.5037738,
-                PressureUnit.KPa => valueBar * 100.0,
-                _ => valueBar
+                PressureUnit.Psi => valuePsi,
+                PressureUnit.Bar => valuePsi / 14.5037738,
+                PressureUnit.KPa => valuePsi * 6.894757293168,
+                _ => valuePsi
             };
         }
 
@@ -919,6 +919,18 @@ namespace Puck.Services
                 isPaused,
                 runStartTimeUtc,
                 extractionWeight
+            );
+        }
+
+        // Returns raw IO dictionaries from the underlying proxy
+        public RawIoState GetRawIoState()
+        {
+            return new RawIoState(
+                IsConnected: _ioProxy.IsCurrentlyConnected,
+                DigitalInputs: _ioProxy.DigitalInputState,
+                DigitalOutputs: _ioProxy.DigitalOutputState,
+                AnalogInputs: _ioProxy.AnalogInputState,
+                AnalogOutputs: _ioProxy.AnalogOutputState
             );
         }
 
@@ -1353,8 +1365,8 @@ namespace Puck.Services
 
         // Pressure measurement (4–20 mA → Bar → selected unit)
         public PressureUnit PressureUnit { get; }
-        public double SensorMinPressureBar { get; }
-        public double SensorMaxPressureBar { get; }
+        public double SensorMinPressurePsi { get; }
+        public double SensorMaxPressurePsi { get; }
         public double SensorMinCurrentmA { get; }
         public double SensorMaxCurrentmA { get; }
 
@@ -1376,8 +1388,8 @@ namespace Puck.Services
             double pumpStopValue,
             int setAllIdleRecircOpenDelayMs,
             PressureUnit pressureUnit,
-            double sensorMinPressureBar,
-            double sensorMaxPressureBar,
+            double sensorMinPressurePsi,
+            double sensorMaxPressurePsi,
             double sensorMinCurrentmA,
             double sensorMaxCurrentmA)
         {
@@ -1398,10 +1410,18 @@ namespace Puck.Services
             PumpStopValue = pumpStopValue;
             SetAllIdleRecircOpenDelayMs = setAllIdleRecircOpenDelayMs;
             PressureUnit = pressureUnit;
-            SensorMinPressureBar = sensorMinPressureBar;
-            SensorMaxPressureBar = sensorMaxPressureBar;
+            SensorMinPressurePsi = sensorMinPressurePsi;
+            SensorMaxPressurePsi = sensorMaxPressurePsi;
             SensorMinCurrentmA = sensorMinCurrentmA;
             SensorMaxCurrentmA = sensorMaxCurrentmA;
         }
     }
+
+    public record RawIoState(
+        bool IsConnected,
+        IReadOnlyDictionary<ushort, DigitalIoState?> DigitalInputs,
+        IReadOnlyDictionary<ushort, DigitalIoState?> DigitalOutputs,
+        IReadOnlyDictionary<ushort, AnalogIoState?> AnalogInputs,
+        IReadOnlyDictionary<ushort, AnalogIoState?> AnalogOutputs
+    );
 }
