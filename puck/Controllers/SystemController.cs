@@ -143,18 +143,6 @@ public class SystemController : ControllerBase
         return Ok(new { kp, ki, kd });
     }
 
-    [HttpPost]
-    [Route("autotune/simulated")]
-    public async Task<IActionResult> PostAutoTuneSimulated([FromBody] SimulatedAutotuneRequest req, CancellationToken ct = default)
-    {
-        var (kp, ki, kd) = await _proxy.AutoTuneSimulatedPidAsync(
-            ct,
-            dt: req?.Dt ?? 0.05,
-            steps: req?.Steps ?? 600,
-            processGain: req?.ProcessGain ?? 10.0
-        );
-        return Ok(new { kp, ki, kd });
-    }
 
     [HttpGet]
     [Route("io/raw")]
