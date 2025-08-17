@@ -238,12 +238,12 @@ public class PID : IPID
     /// Upper output limit of the controller.
     /// This should obviously be a numerically greater value than the lower output limit.
     /// </summary>
-    public double OutputUpperLimit { get; }
+    public double OutputUpperLimit { get; private set; }
     /// <summary>
     /// Lower output limit of the controller
     /// This should obviously be a numerically lesser value than the upper output limit.
     /// </summary>
-    public double OutputLowerLimit { get; }
+    public double OutputLowerLimit { get; private set; }
 
     /// <summary>
     /// Optional feedforward term to be added to the output.
@@ -465,6 +465,21 @@ public class PID : IPID
             Kp = kp;
             Ki = ki;
             Kd = kd;
+        }
+    }
+
+    /// <summary>
+    /// Set output limits at runtime (thread-safe). Upper must be greater than lower.
+    /// </summary>
+    public void SetOutputLimits(double upper, double lower)
+    {
+        if (upper <= lower) throw new ArgumentException("Output upper limit must be greater than lower limit.");
+        lock (_lock)
+        {
+            OutputUpperLimit = upper;
+            OutputLowerLimit = lower;
+            // Keep last output within new bounds to avoid large jumps
+            _lastOutput = Math.Max(OutputLowerLimit, Math.Min(OutputUpperLimit, _lastOutput));
         }
     }
 }

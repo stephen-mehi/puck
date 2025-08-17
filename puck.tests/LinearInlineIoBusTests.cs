@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+namespace puck.tests;
 public class LinearInlineIoBusTests
 {
     private const ushort REG_MODULE_COUNT = 1400;

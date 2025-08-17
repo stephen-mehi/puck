@@ -322,7 +322,7 @@ namespace Puck.Tests
             int steadyStateSamples = (int)(costConfig.SteadyStateFraction * steps);
 
             // Generalized simulation delegate for genetic tuner
-            PidSimulationDelegate simDelegate = parameters =>
+            PidEvalDelegate simDelegate = parameters =>
             {
                 var system = new PumpSystem(parameters.InitialProcessValue, processGain, parameters.TimeStep);
                 var pid = new PID(
@@ -350,7 +350,7 @@ namespace Puck.Tests
                         double.IsNaN(system.Pressure) || double.IsInfinity(system.Pressure))
                     {
                         // Penalize invalid runs
-                        return new PidSimulationResult { Cost = double.MaxValue };
+                        return new PidResult { Cost = double.MaxValue };
                     }
                     system.Step(output);
                     double err = Math.Abs(sp - system.Pressure);
@@ -386,11 +386,11 @@ namespace Puck.Tests
                 //if (maxOvershoot > costConfig.OvershootThreshold)
                 //    cost += costConfig.OvershootHardPenalty * (maxOvershoot - costConfig.OvershootThreshold);
 
-                return new PidSimulationResult { Cost = cost };
+                return new PidResult { Cost = cost };
             };
 
             var tuner = new GeneticPidTuner(seed: 42);
-            var baseParams = new PidSimulationParameters
+            var baseParams = new PidParameters
             {
                 Setpoint = setpoint,
                 SimulationTime = steps * dt,

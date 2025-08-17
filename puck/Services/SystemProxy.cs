@@ -154,9 +154,10 @@ namespace Puck.Services
         // Auto-tune configuration/profile (constructed once)
         private readonly double _autoTuneDt = 0.05;
         private readonly int _autoTuneSteps = 600;
+        private readonly double[] _simulatedAutoTuneSetpointProfile;
         private readonly double[] _autoTuneSetpointProfile;
 
-        
+
 
         // Overload: construct using options bag for all defaults
         public SystemProxy(
@@ -220,6 +221,7 @@ namespace Puck.Services
             _stateDeltaSubject.OnNext(new ConnectionChanged(_ioProxy.IsCurrentlyConnected));
 
             // Initialize default genetic auto-tune setpoint profile
+            _simulatedAutoTuneSetpointProfile = BuildSimulatedAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
             _autoTuneSetpointProfile = BuildAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
         }
 
@@ -950,7 +952,7 @@ namespace Puck.Services
         /// <param name="processGain">PT1 process gain used in simulation</param>
         /// <param name="options">Genetic tuner options; defaults are applied if null</param>
         /// <returns>(Kp, Ki, Kd) tuned gains that were applied to the internal PID</returns>
-        public async Task<(double Kp, double Ki, double Kd)> AutoTunePidGeneticAsync(
+        public async Task<(double Kp, double Ki, double Kd)> AutoTuneSimulatedPidAsync(
             CancellationToken ct,
             double dt = 0.05,
             int steps = 600,
@@ -964,8 +966,8 @@ namespace Puck.Services
             {
                 // Use prebuilt profile if dt/steps match; otherwise build a temporary one
                 var setpointProfile = (Math.Abs(dt - _autoTuneDt) < 1e-12 && steps == _autoTuneSteps)
-                    ? _autoTuneSetpointProfile
-                    : BuildAutoTuneSetpointProfile(dt, steps);
+                    ? _simulatedAutoTuneSetpointProfile
+                    : BuildSimulatedAutoTuneSetpointProfile(dt, steps);
 
                 // Cost weights (mirrors test config, modest penalties for overshoot, favor steady-state accuracy)
                 double iaeWeight = 1.0;
@@ -975,7 +977,7 @@ namespace Puck.Services
                 int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
 
                 // PT1 process simulation (pump speed -> pressure). Clamp actuator to [0,1].
-                PidSimulationDelegate simDelegate = parameters =>
+                PidEvalDelegate simDelegate = parameters =>
                 {
                     double pressure = parameters.InitialProcessValue;
 
@@ -1010,7 +1012,7 @@ namespace Puck.Services
                             double.IsNaN(pressure) ||
                             double.IsInfinity(pressure))
                         {
-                            return new PidSimulationResult { Cost = double.MaxValue };
+                            return new PidResult { Cost = double.MaxValue };
                         }
 
                         // Actuator clamp 0..1
@@ -1048,11 +1050,11 @@ namespace Puck.Services
                                   + overshootWeight * maxOvershoot
                                   + steadyStateWeight * steadyStateError
                                   + finalErrorWeight * finalSteadyStateError;
-                    return new PidSimulationResult { Cost = cost };
+                    return new PidResult { Cost = cost };
                 };
 
                 var tuner = new GeneticPidTuner(seed: 42);
-                var baseParams = new PidSimulationParameters
+                var baseParams = new PidParameters
                 {
                     Setpoint = 1.0,
                     SimulationTime = steps * dt,
@@ -1100,8 +1102,10 @@ namespace Puck.Services
             CancellationToken ct,
             double dt = 0.1,
             int steps = 120,
-            double targetPressureBar = 9.0,
-            double maxSafePressureBar = 12.0,
+            double maxSafePressurePsi = 50.0,
+            double targetPressurePsi = 30.0,
+            double maxPumpSpeed = 14,
+            double minPumpSpeed = 4,
             GeneticPidTuner.GeneticTunerOptions? options = null)
         {
             await _systemLock.WaitAsync(ct);
@@ -1118,13 +1122,17 @@ namespace Puck.Services
                 double finalErrorWeight = 400.0;
                 int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
 
-                PidSimulationDelegate liveEvaluator = parameters =>
+                PidEvalDelegate liveEvaluator = parameters =>
                 {
+                    double prevUpper = _pid.OutputUpperLimit;
+                    double prevLower = _pid.OutputLowerLimit;
                     try
                     {
                         // Apply candidate gains and reset controller state
                         _pid.SetGains(parameters.Kp, parameters.Ki, parameters.Kd);
                         _pid.ResetController();
+                        // Temporarily sync PID output limits to requested pump speed range
+                        _pid.SetOutputLimits(maxPumpSpeed, minPumpSpeed);
 
                         double errorSum = 0;
                         double maxOvershoot = 0;
@@ -1139,32 +1147,33 @@ namespace Puck.Services
                         for (int i = 0; i < steps; i++)
                         {
                             if (ct.IsCancellationRequested)
-                                return new PidSimulationResult { Cost = double.MaxValue };
+                                return new PidResult { Cost = double.MaxValue };
 
-                            double sp = setpointProfile[i] * targetPressureBar;
+                            double sp = setpointProfile[i] * targetPressurePsi;
                             double? p = GetGroupHeadPressure();
                             if (!p.HasValue)
-                                return new PidSimulationResult { Cost = double.MaxValue };
+                                return new PidResult { Cost = double.MaxValue };
 
-                            if (p.Value > maxSafePressureBar)
+                            if (p.Value > maxSafePressurePsi)
                             {
                                 try { StopPumpInternalAsync(ct).GetAwaiter().GetResult(); } catch { }
-                                return new PidSimulationResult { Cost = double.MaxValue };
+                                return new PidResult { Cost = double.MaxValue };
                             }
 
                             var now = DateTime.UtcNow;
                             double u = _pid.PID_iterate(sp, p.Value, now - prevTime);
                             prevTime = now;
-                            double clampedU = Math.Max(_pid.OutputLowerLimit, Math.Min(_pid.OutputUpperLimit, u));
+                            //not using _pid.OutputUpperLimit here because override during tuning
+                            double clampedU = Math.Max(minPumpSpeed, Math.Min(maxPumpSpeed, u));
                             ApplyPumpSpeedInternalAsync(clampedU, ct).GetAwaiter().GetResult();
 
                             // wait for next sample
                             try { Task.Delay(TimeSpan.FromSeconds(dt), ct).Wait(ct); }
-                            catch { return new PidSimulationResult { Cost = double.MaxValue }; }
+                            catch { return new PidResult { Cost = double.MaxValue }; }
 
                             p = GetGroupHeadPressure();
                             if (!p.HasValue)
-                                return new PidSimulationResult { Cost = double.MaxValue };
+                                return new PidResult { Cost = double.MaxValue };
 
                             double e = Math.Abs(sp - p.Value);
                             errors[i] = e;
@@ -1190,18 +1199,22 @@ namespace Puck.Services
                                       + overshootWeight * maxOvershoot
                                       + steadyStateWeight * steadyStateError
                                       + finalErrorWeight * finalSteadyStateError;
-                        return new PidSimulationResult { Cost = cost };
+                        return new PidResult { Cost = cost };
                     }
                     catch
                     {
-                        return new PidSimulationResult { Cost = double.MaxValue };
+                        return new PidResult { Cost = double.MaxValue };
+                    }
+                    finally
+                    {
+                        _pid.SetOutputLimits(prevUpper, prevLower);
                     }
                 };
 
-                var tuner = new GeneticPidTuner(seed: 42);
-                var baseParams = new PidSimulationParameters
+                var geneticTuner = new GeneticPidTuner(seed: 42);
+                var baseParams = new PidParameters
                 {
-                    Setpoint = targetPressureBar,
+                    Setpoint = targetPressurePsi,
                     SimulationTime = steps * dt,
                     TimeStep = dt,
                     InitialProcessValue = GetGroupHeadPressure() ?? 0.0
@@ -1228,7 +1241,7 @@ namespace Puck.Services
                 (double Kp, double Ki, double Kd) best;
                 try
                 {
-                    best = tuner.Tune(liveEvaluator, baseParams, options);
+                    best = geneticTuner.Tune(liveEvaluator, baseParams, options);
                 }
                 finally
                 {
@@ -1247,7 +1260,7 @@ namespace Puck.Services
             }
         }
 
-        private static double[] BuildAutoTuneSetpointProfile(double dt, int steps)
+        private static double[] BuildSimulatedAutoTuneSetpointProfile(double dt, int steps)
         {
             var profile = new double[steps];
             for (int i = 0; i < steps; i++)
@@ -1255,6 +1268,25 @@ namespace Puck.Services
                 double t = i * dt;
                 if (t < 5.0) profile[i] = 0.0;
                 else if (t < 15.0) profile[i] = 0.95;
+                else if (t < 25.0) profile[i] = 0.5;
+                else if (t < 35.0) profile[i] = 0.75;
+                else if (t < 45.0) profile[i] = 0.25;
+                else if (t < 55.0) profile[i] = 0.0;
+                else if (t < 65.0) profile[i] = 0.9;
+                else if (t < 75.0) profile[i] = 0.3;
+                else profile[i] = 0.7;
+            }
+            return profile;
+        }
+
+        private static double[] BuildAutoTuneSetpointProfile(double dt, int steps)
+        {
+            var profile = new double[steps];
+            for (int i = 0; i < steps; i++)
+            {
+                double t = i * dt;
+                if (t < 5.0) profile[i] = 0.0;
+                else if (t < 15.0) profile[i] = 0.9;
                 else if (t < 25.0) profile[i] = 0.5;
                 else if (t < 35.0) profile[i] = 0.75;
                 else if (t < 45.0) profile[i] = 0.25;

@@ -7,7 +7,7 @@ namespace puck.Services.PID
     /// <summary>
     /// Parameters for PID simulation.
     /// </summary>
-    public class PidSimulationParameters
+    public class PidParameters
     {
         public double Setpoint { get; set; }
         public double Kp { get; set; }
@@ -20,9 +20,9 @@ namespace puck.Services.PID
     }
 
     /// <summary>
-    /// Result of a PID simulation.
+    /// Result of a PID
     /// </summary>
-    public class PidSimulationResult
+    public class PidResult
     {
         public double Cost { get; set; }
         public List<double> ProcessValues { get; set; } = new List<double>();
@@ -35,7 +35,7 @@ namespace puck.Services.PID
     /// </summary>
     /// <param name="parameters">Simulation parameters (setpoint, gains, etc.)</param>
     /// <returns>Simulation result (cost, time series, etc.)</returns>
-    public delegate PidSimulationResult PidSimulationDelegate(PidSimulationParameters parameters);
+    public delegate PidResult PidEvalDelegate(PidParameters parameters);
 
     /// <summary>
     /// Genetic algorithm-based PID tuner. Optimizes Kp, Ki, Kd for a given process simulation.
@@ -82,8 +82,8 @@ namespace puck.Services.PID
         /// <param name="kdRange">(min, max) for Kd</param>
         /// <returns>Tuple of (Kp, Ki, Kd) with lowest cost</returns>
         public (double Kp, double Ki, double Kd) Tune(
-            PidSimulationDelegate simulateProcess,
-            PidSimulationParameters baseParameters,
+            PidEvalDelegate simulateProcess,
+            PidParameters baseParameters,
             int generations = 50,
             int populationSize = 30,
             (double min, double max)? kpRange = null,
@@ -102,8 +102,8 @@ namespace puck.Services.PID
         }
 
         public (double Kp, double Ki, double Kd) Tune(
-            PidSimulationDelegate simulateProcess,
-            PidSimulationParameters baseParameters,
+            PidEvalDelegate simulateProcess,
+            PidParameters baseParameters,
             GeneticTunerOptions options)
         {
             // Individual: (Kp, Ki, Kd, cost)
@@ -220,9 +220,9 @@ namespace puck.Services.PID
 
         private double Clamp(double v, double min, double max) => Math.Max(min, Math.Min(max, v));
 
-        private PidSimulationParameters CloneParameters(PidSimulationParameters p)
+        private PidParameters CloneParameters(PidParameters p)
         {
-            return new PidSimulationParameters
+            return new PidParameters
             {
                 Setpoint = p.Setpoint,
                 Kp = p.Kp,
@@ -237,8 +237,8 @@ namespace puck.Services.PID
 
         private void EvaluatePopulation(
             List<(double Kp, double Ki, double Kd, double Cost)> population,
-            PidSimulationDelegate simulateProcess,
-            PidSimulationParameters baseParameters,
+            PidEvalDelegate simulateProcess,
+            PidParameters baseParameters,
             GeneticTunerOptions options)
         {
             if (options.EvaluateInParallel)

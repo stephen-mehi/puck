@@ -64,7 +64,7 @@ builder
         sensorMinCurrentmA: 4.0,
         sensorMaxCurrentmA: 20.0))
     .AddSingleton<SystemProxy>()
-    .AddSingleton(new PID(kp: 1, ki: 1, kd: 1, n: 1, outputUpperLimit: 5, outputLowerLimit: 0))
+    .AddSingleton(new PID(kp: 1, ki: 1, kd: 1, n: 1, outputUpperLimit: 20, outputLowerLimit: 4))
     .AddSingleton<PauseContainer>()
     .AddSingleton<RunResultRepo>()
     .AddSingleton<RunParametersRepo>()

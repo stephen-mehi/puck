@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
+namespace puck.Services.IoBus;
 public class Inline2701388Tests
 {
     private const ushort REG_MODULE_COUNT = 1400;
