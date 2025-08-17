@@ -91,6 +91,21 @@ public class SystemController : ControllerBase
         double? KdMax
     );
 
+    public record LiveAutotuneRequest(
+        double? Dt,
+        int? Steps,
+        double? TargetPressurePsi,
+        double? MaxSafePressurePsi,
+        double? MinPumpSpeed,
+        double? MaxPumpSpeed
+    );
+
+    public record SimulatedAutotuneRequest(
+        double? Dt,
+        int? Steps,
+        double? ProcessGain
+    );
+
     [HttpGet]
     [Route("state")]
     public async Task<IActionResult> GetIoStateAsync(CancellationToken ct = default)
@@ -110,6 +125,35 @@ public class SystemController : ControllerBase
         };
 
         return Ok(state);
+    }
+
+    [HttpPost]
+    [Route("autotune/live")]
+    public async Task<IActionResult> PostAutoTuneLive([FromBody] LiveAutotuneRequest req, CancellationToken ct = default)
+    {
+        var (kp, ki, kd) = await _proxy.AutoTunePidGeneticLiveAsync(
+            ct,
+            dt: req?.Dt ?? 0.1,
+            steps: req?.Steps ?? 120,
+            maxSafePressurePsi: req?.MaxSafePressurePsi ?? 50.0,
+            targetPressurePsi: req?.TargetPressurePsi ?? 30.0,
+            maxPumpSpeed: req?.MaxPumpSpeed ?? 14.0,
+            minPumpSpeed: req?.MinPumpSpeed ?? 4.0
+        );
+        return Ok(new { kp, ki, kd });
+    }
+
+    [HttpPost]
+    [Route("autotune/simulated")]
+    public async Task<IActionResult> PostAutoTuneSimulated([FromBody] SimulatedAutotuneRequest req, CancellationToken ct = default)
+    {
+        var (kp, ki, kd) = await _proxy.AutoTuneSimulatedPidAsync(
+            ct,
+            dt: req?.Dt ?? 0.05,
+            steps: req?.Steps ?? 600,
+            processGain: req?.ProcessGain ?? 10.0
+        );
+        return Ok(new { kp, ki, kd });
     }
 
     [HttpGet]
