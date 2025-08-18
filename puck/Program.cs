@@ -123,7 +123,11 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PuckDbContext>();
-    db.Database.Migrate();
+    var hasMigrations = db.Database.GetMigrations().Any();
+    if (hasMigrations)
+        db.Database.Migrate();
+    else
+        db.Database.EnsureCreated();
 }
 
 var reqLogger = 
