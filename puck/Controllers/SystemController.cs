@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using puck.Services.PID;
 using Puck.Services;
+using Puck.Services.Persistence;
+using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.IO.Ports;
 using static Puck.Controllers.SystemController;
@@ -67,13 +69,15 @@ public class SystemController : ControllerBase
         SystemProxy proxy,
         PauseContainer pauseCont,
         RunParametersRepo runParamsRepo,
-        RunResultRepo runResultRepo)
+        RunResultRepo runResultRepo,
+        PuckDbContext db)
     {
         _runResultRepo = runResultRepo;
         _logger = logger;
         _proxy = proxy;
         _pauseCont = pauseCont;
         _runParamsRepo = runParamsRepo;
+        _db = db;
     }
 
     public record AutoTuneLiveRequest(
@@ -91,7 +95,7 @@ public class SystemController : ControllerBase
         double? KdMax
     );
 
-    public record LiveAutotuneRequest(
+    public record AutotuneRequest(
         double? Dt,
         int? Steps,
         double? TargetPressurePsi,
@@ -128,10 +132,10 @@ public class SystemController : ControllerBase
     }
 
     [HttpPost]
-    [Route("autotune/live")]
-    public async Task<IActionResult> PostAutoTuneLive([FromBody] LiveAutotuneRequest req, CancellationToken ct = default)
+    [Route("pid/autotune")]
+    public async Task<IActionResult> PostAutoTuneLive([FromBody] AutotuneRequest req, CancellationToken ct = default)
     {
-        var (kp, ki, kd) = await _proxy.AutoTunePidGeneticLiveAsync(
+        var result = await _proxy.AutoTunePidGeneticLiveAsync(
             ct,
             dt: req?.Dt ?? 0.1,
             steps: req?.Steps ?? 120,
@@ -140,17 +144,76 @@ public class SystemController : ControllerBase
             maxPumpSpeed: req?.MaxPumpSpeed ?? 14.0,
             minPumpSpeed: req?.MinPumpSpeed ?? 4.0
         );
-        return Ok(new { kp, ki, kd });
+        // Replace any previous PID profile and associated runs so only one valid set exists
+        var existingProfiles = await _db.PidProfiles.ToListAsync(ct);
+        if (existingProfiles.Count > 0)
+        {
+            _db.PidProfiles.RemoveRange(existingProfiles);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var profile = new PidProfile
+        {
+            Name = "Active",
+            Kp = result.Kp,
+            Ki = result.Ki,
+            Kd = result.Kd,
+            Notes = "Set by live autotune"
+        };
+        _db.PidProfiles.Add(profile);
+        await _db.SaveChangesAsync(ct);
+
+        var run = new PidAutotuneRun
+        {
+            PidProfileId = profile.Id,
+            DtSeconds = req?.Dt ?? 0.1,
+            Steps = req?.Steps ?? 120,
+            TargetPressurePsi = req?.TargetPressurePsi ?? 30.0,
+            MaxSafePressurePsi = req?.MaxSafePressurePsi ?? 50.0,
+            MinPumpSpeed = req?.MinPumpSpeed ?? 4.0,
+            MaxPumpSpeed = req?.MaxPumpSpeed ?? 14.0,
+            BestKp = result.Kp,
+            BestKi = result.Ki,
+            BestKd = result.Kd,
+            Iae = result.Iae,
+            MaxOvershoot = result.MaxOvershoot,
+            SteadyStateError = result.SteadyStateError,
+            FinalSteadyStateError = result.FinalSteadyStateError,
+            CompletedUtc = DateTime.UtcNow
+        };
+        _db.PidAutotuneRuns.Add(run);
+        await _db.SaveChangesAsync(ct);
+
+        if (result.Samples != null)
+        {
+            var entities = result.Samples.Select(s => new PidAutotuneSample
+            {
+                PidAutotuneRunId = run.Id,
+                TimeSeconds = s.TimeSeconds,
+                Setpoint = s.Setpoint,
+                Process = s.Process,
+                Output = s.Output,
+                Windup = s.Windup,
+                ClampedUpper = s.ClampedUpper,
+                ClampedLower = s.ClampedLower
+            }).ToList();
+            _db.PidAutotuneSamples.AddRange(entities);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return Ok(new { result.Kp, result.Ki, result.Kd, Samples = result.Samples });
     }
 
 
     [HttpGet]
-    [Route("io/raw")]
+    [Route("io")]
     public IActionResult GetRawIoState()
     {
         var raw = _proxy.GetRawIoState();
         return Ok(raw);
     }
+
+    private readonly PuckDbContext _db;
 
     [HttpPost]
     [Route("run-status/idle")]
@@ -207,20 +270,27 @@ public class SystemController : ControllerBase
     }
 
     [HttpPost]
-    [Route("run-status/run/{runParamsId}")]
+    [Route("run-status/run/{runParamsId:int}")]
     public async Task<IActionResult> PostRunStatusRun(
-        [FromQuery] string runParamsId,
+        [FromRoute] int runParamsId,
         CancellationToken ct = default)
     {
         _logger.LogInformation("Posted run");
 
-        if (string.IsNullOrEmpty(runParamsId))
-            throw new Exception("Run parameters id must be included in query string. Otherwise use endpoint that uses default run params");
-
-        var runParams = _runParamsRepo.GetRunParametersById(runParamsId);
-        if (runParams == null)
+        var profile = await _runParamsRepo.GetProfileAsync(runParamsId, ct);
+        if (profile == null)
             return NotFound($"Run parameters not found for id '{runParamsId}'");
 
+        var runParams = new RunParameters
+        {
+            InitialPumpSpeed = profile.InitialPumpSpeed,
+            GroupHeadTemperatureFarenheit = profile.GroupHeadTemperatureFarenheit,
+            ThermoblockTemperatureFarenheit = profile.ThermoblockTemperatureFarenheit,
+            PreExtractionTargetTemperatureFarenheit = profile.PreExtractionTargetTemperatureFarenheit,
+            ExtractionWeightGrams = profile.ExtractionWeightGrams,
+            MaxExtractionSeconds = profile.MaxExtractionSeconds,
+            TargetPressureBar = profile.TargetPressureBar
+        };
         await _proxy.RunAsync(runParams, ct);
         return Ok("Set to run");
     }

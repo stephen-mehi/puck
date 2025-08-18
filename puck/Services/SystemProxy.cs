@@ -745,13 +745,14 @@ namespace Puck.Services
             _stateDeltaSubject.OnNext(new RunStateChanged(RunState.Run));
         }
 
-        public Task RunAsync(
-            RunParameters runParams,
+        public async Task RunAsync(
+            RunParameters? runParams,
             CancellationToken ct)
         {
-            _paramRepo.SetActiveParameters(runParams);
-
-            return ExecuteSystemActionAsync(() => RunInternalAsync(ct), ct);
+            var effectiveParams = runParams ?? _paramRepo.GetActiveParameters();
+            if (effectiveParams == null)
+                throw new Exception("No active run parameters are set");
+            await ExecuteSystemActionAsync(() => RunInternalAsync(ct), ct);
         }
 
         public async Task SetRunStateIdleAsync(CancellationToken ct)
@@ -1098,7 +1099,33 @@ namespace Puck.Services
         /// Live genetic auto-tuning using actual IO: pump output as actuator and pressure sensor as feedback.
         /// This method actuates the pump; ensure safe test conditions. Evaluation is serialized and non-parallel.
         /// </summary>
-        public async Task<(double Kp, double Ki, double Kd)> AutoTunePidGeneticLiveAsync(
+        public class AutotuneSample
+        {
+            public double TimeSeconds { get; set; }
+            public double Setpoint { get; set; }
+            public double Process { get; set; }
+            public double Output { get; set; }
+            public double Proportional { get; set; }
+            public double Integral { get; set; }
+            public double Derivative { get; set; }
+            public bool Windup { get; set; }
+            public bool ClampedUpper { get; set; }
+            public bool ClampedLower { get; set; }
+        }
+
+        public class AutotuneResult
+        {
+            public double Kp { get; set; }
+            public double Ki { get; set; }
+            public double Kd { get; set; }
+            public double Iae { get; set; }
+            public double MaxOvershoot { get; set; }
+            public double SteadyStateError { get; set; }
+            public double FinalSteadyStateError { get; set; }
+            public IReadOnlyList<AutotuneSample> Samples { get; set; } = Array.Empty<AutotuneSample>();
+        }
+
+        public async Task<AutotuneResult> AutoTunePidGeneticLiveAsync(
             CancellationToken ct,
             double dt = 0.1,
             int steps = 120,
@@ -1248,11 +1275,86 @@ namespace Puck.Services
                     try { await StopPumpInternalAsync(ct); } catch { }
                 }
 
+                // Apply tuned gains
                 _pid.SetGains(best.Kp, best.Ki, best.Kd);
                 _stateDeltaSubject.OnNext(new PidParametersChanged(
                     best.Kp, best.Ki, best.Kd, _pid.N, _pid.OutputUpperLimit, _pid.OutputLowerLimit));
 
-                return best;
+                // Post-tune validation pass collecting samples/metrics
+                var samples = new List<AutotuneSample>(steps);
+                double iae = 0, maxOvershoot = 0, steadyStateError = 0, finalSteadyStateError = 0;
+                int steadyStateSamplesCount = Math.Max(1, (int)(0.05 * steps));
+                double prevSp = double.NaN; int stepDir = 0;
+
+                try
+                {
+                    DateTime prevTime = DateTime.UtcNow;
+                    for (int i = 0; i < steps; i++)
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        double sp = setpointProfile[i] * targetPressurePsi;
+                        double? p = GetGroupHeadPressure();
+                        if (!p.HasValue) break;
+                        if (p.Value > maxSafePressurePsi)
+                        {
+                            try { await StopPumpInternalAsync(ct); } catch { }
+                            break;
+                        }
+                        var now = DateTime.UtcNow;
+                        double u = _pid.PID_iterate(sp, p.Value, now - prevTime);
+                        prevTime = now;
+                        double clampedU = Math.Max(minPumpSpeed, Math.Min(maxPumpSpeed, u));
+                        await ApplyPumpSpeedInternalAsync(clampedU, ct);
+
+                        try { await Task.Delay(TimeSpan.FromSeconds(dt), ct); } catch { break; }
+
+                        var p2 = GetGroupHeadPressure();
+                        double pv = p2 ?? p.Value;
+                        double errAbs = Math.Abs(sp - pv);
+                        iae += errAbs * dt;
+                        if (!double.IsNaN(prevSp) && Math.Abs(sp - prevSp) > 1e-9) stepDir = sp > prevSp ? 1 : -1;
+                        double overshoot = 0.0;
+                        if (stepDir > 0 && pv > sp) overshoot = pv - sp;
+                        else if (stepDir < 0 && pv < sp) overshoot = sp - pv;
+                        if (overshoot > maxOvershoot) maxOvershoot = overshoot;
+                        prevSp = sp;
+
+                        if (i >= steps - steadyStateSamplesCount) steadyStateError += errAbs;
+                        if (i >= steps - 10) finalSteadyStateError += errAbs;
+
+                        samples.Add(new AutotuneSample
+                        {
+                            TimeSeconds = (i + 1) * dt,
+                            Setpoint = sp,
+                            Process = pv,
+                            Output = clampedU,
+                            Proportional = best.Kp * (sp - pv),
+                            Integral = best.Ki * _pid.LastIntegral,
+                            Derivative = best.Kd * _pid.LastDerivative,
+                            Windup = _pid.WindupAlarm,
+                            ClampedUpper = Math.Abs(clampedU - _pid.OutputUpperLimit) < 1e-6,
+                            ClampedLower = Math.Abs(clampedU - _pid.OutputLowerLimit) < 1e-6
+                        });
+                    }
+                }
+                finally
+                {
+                    try { await StopPumpInternalAsync(ct); } catch { }
+                }
+
+                var result = new AutotuneResult
+                {
+                    Kp = best.Kp,
+                    Ki = best.Ki,
+                    Kd = best.Kd,
+                    Iae = iae,
+                    MaxOvershoot = maxOvershoot,
+                    SteadyStateError = samples.Count > 0 ? steadyStateError / Math.Max(1, Math.Min(steadyStateSamplesCount, samples.Count)) : 0,
+                    FinalSteadyStateError = samples.Count > 0 ? finalSteadyStateError / Math.Min(10, samples.Count) : 0,
+                    Samples = samples
+                };
+
+                return result;
             }
             finally
             {

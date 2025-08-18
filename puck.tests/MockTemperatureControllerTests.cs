@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
-namespace Puck.Tests
+namespace puck.tests
 {
     public class MockTemperatureControllerTests
     {

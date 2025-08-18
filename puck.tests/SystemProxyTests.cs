@@ -13,8 +13,10 @@ using Xunit;
 using System.Diagnostics;
 using Xunit.Abstractions;
 using Puck.Models;
+using Microsoft.EntityFrameworkCore;
+using Puck.Services.Persistence;
 
-namespace Puck.Tests
+namespace puck.tests
 {
     public class SystemProxyTests
     {
@@ -44,7 +46,13 @@ namespace Puck.Tests
                     outputUpperLimit: 1,
                     outputLowerLimit: 0);
 
-            var paramRepo = new RunParametersRepo();
+            var options = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db = new PuckDbContext(options);
+            db.Database.OpenConnection();
+            db.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db);
             var runRepo = new RunResultRepo();
             return new SystemProxy(
                 logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo,
@@ -218,7 +226,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
@@ -293,7 +307,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var proxy2 = new SystemProxy(
                 logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo,
@@ -344,7 +364,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
@@ -411,7 +437,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
@@ -474,7 +506,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
@@ -537,7 +575,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
@@ -599,7 +643,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
@@ -670,7 +720,13 @@ namespace Puck.Tests
                 n: 1,
                 outputUpperLimit: 1,
                 outputLowerLimit: 0);
-            var paramRepo = new RunParametersRepo();
+            var options2 = new DbContextOptionsBuilder<PuckDbContext>()
+                .UseSqlite("Data Source=:memory:")
+                .Options;
+            var db2 = new PuckDbContext(options2);
+            db2.Database.OpenConnection();
+            db2.Database.EnsureCreated();
+            var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
@@ -710,7 +766,7 @@ namespace Puck.Tests
                 MaxExtractionSeconds = 30,
                 TargetPressureBar = 9.0
             };
-            paramRepo.SetActiveParameters(runParams);
+            await paramRepo.SetActiveParametersAsync(runParams, CancellationToken.None);
 
             // Act
             using var cts = new CancellationTokenSource();

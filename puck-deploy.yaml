@@ -21,6 +21,9 @@ spec:
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
+        env:
+        - name: DB_PATH
+          value: /data/puck.db
         # Define health probe
         livenessProbe:
           httpGet:
@@ -42,6 +45,8 @@ spec:
             name: ttyusb
           - mountPath: /dev/ttyUSB1
             name: ttyusb1
+          - mountPath: /data
+            name: puck-data
       volumes:
         - name: ttyusb
           hostPath:
@@ -49,6 +54,20 @@ spec:
         - name: ttyusb1
           hostPath:
             path: /dev/ttyUSB1
+        - name: puck-data
+          persistentVolumeClaim:
+            claimName: puck-data-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: puck-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service

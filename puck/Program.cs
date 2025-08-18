@@ -3,6 +3,9 @@ using Puck.Services.TemperatureController;
 using Puck.Services;
 using puck.Services.IoBus;
 using puck.Services.PID;
+using Microsoft.EntityFrameworkCore;
+using Puck.Services.Persistence;
+using System.Linq;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +39,13 @@ var runParams =
 // Add services to the container.
 builder
     .Services
+    .AddDbContext<PuckDbContext>(options =>
+    {
+        // SQLite file path (env override) e.g., /data/puck.db
+        var dbPath = Environment.GetEnvironmentVariable("DB_PATH") ?? "puck.db";
+        var cs = $"Data Source={dbPath};Cache=Shared";
+        options.UseSqlite(cs);
+    })
     .AddSingleton<ITcpIOBusConnectionFactory, PhoenixIOBusConnectionFactory>()
     .AddSingleton<IPhoenixProxy, PhoenixProxy>()
     .AddSingleton<FujiPXFDriverProvider>()
@@ -56,7 +66,7 @@ builder
         pidLoopDelayMs: 500,
         mainScanLoopDelayMs: 250,
         runStateMonitorDelayMs: 250,
-        pumpStopValue: 0.0,
+        pumpStopValue: 4,
         setAllIdleRecircOpenDelayMs: 250,
         pressureUnit: PressureUnit.Psi,
         sensorMinPressurePsi: 0,
@@ -64,7 +74,16 @@ builder
         sensorMinCurrentmA: 4.0,
         sensorMaxCurrentmA: 20.0))
     .AddSingleton<SystemProxy>()
-    .AddSingleton(new PID(kp: 1, ki: 1, kd: 1, n: 1, outputUpperLimit: 20, outputLowerLimit: 4))
+    .AddSingleton(sp =>
+    {
+        var db = sp.GetRequiredService<PuckDbContext>();
+        var profile = db.PidProfiles.OrderByDescending(p => p.CreatedUtc).FirstOrDefault();
+        var kp = profile?.Kp ?? 1.0;
+        var ki = profile?.Ki ?? 1.0;
+        var kd = profile?.Kd ?? 1.0;
+        // Pump output bounds: match current defaults (min 4, max 20)
+        return new PID(kp: kp, ki: ki, kd: kd, n: 1, outputUpperLimit: 20, outputLowerLimit: 4);
+    })
     .AddSingleton<PauseContainer>()
     .AddSingleton<RunResultRepo>()
     .AddSingleton<RunParametersRepo>()
@@ -97,6 +116,13 @@ builder
 
 
 var app = builder.Build();
+
+// Ensure database schema is created/migrated
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<PuckDbContext>();
+    db.Database.Migrate();
+}
 
 var reqLogger = 
     app

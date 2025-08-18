@@ -2,7 +2,7 @@ using System;
 using Xunit;
 using puck.Services.PID;
 
-namespace Puck.Tests
+namespace puck.tests
 {
     public class PIDTests
     {

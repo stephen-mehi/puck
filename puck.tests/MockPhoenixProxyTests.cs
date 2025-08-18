@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using puck.Services.IoBus;
 using Xunit;
 
-namespace Puck.Tests
+namespace puck.tests
 {
     public class MockPhoenixProxyTests
     {
