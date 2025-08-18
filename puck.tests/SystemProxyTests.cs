@@ -15,11 +15,33 @@ using Xunit.Abstractions;
 using Puck.Models;
 using Microsoft.EntityFrameworkCore;
 using Puck.Services.Persistence;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace puck.tests
 {
     public class SystemProxyTests
     {
+        private sealed class SingleServiceScopeFactory : IServiceScopeFactory
+        {
+            private readonly RunParametersRepo _repo;
+            public SingleServiceScopeFactory(RunParametersRepo repo) { _repo = repo; }
+            public IServiceScope CreateScope() => new Scope(_repo);
+            private sealed class Scope : IServiceScope
+            {
+                private readonly RunParametersRepo _repo;
+                public Scope(RunParametersRepo repo) { _repo = repo; ServiceProvider = new Provider(_repo); }
+                public IServiceProvider ServiceProvider { get; }
+                public void Dispose() { }
+                private sealed class Provider : IServiceProvider
+                {
+                    private readonly RunParametersRepo _repo;
+                    public Provider(RunParametersRepo repo) { _repo = repo; }
+                    public object? GetService(Type serviceType)
+                        => serviceType == typeof(RunParametersRepo) ? _repo : null;
+                }
+            }
+        }
+
         private readonly ITestOutputHelper _output;
         public SystemProxyTests(ITestOutputHelper output) => _output = output;
         private SystemProxy CreateSystemProxy(
@@ -53,9 +75,10 @@ namespace puck.tests
             db.Database.OpenConnection();
             db.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             return new SystemProxy(
-                logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo,
+                logger, phoenixMock, tempContainer, pauseContainer, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -233,12 +256,13 @@ namespace puck.tests
             db2.Database.OpenConnection();
             db2.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db2);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             // Configure SystemProxy for PSI, -14.5 to 362.5 psi range
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -314,9 +338,10 @@ namespace puck.tests
             db2.Database.OpenConnection();
             db2.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db2);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             var proxy2 = new SystemProxy(
-                logger, phoenixMock, tempContainer, pauseContainer, pid, paramRepo, runRepo,
+                logger, phoenixMock, tempContainer, pauseContainer, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -371,11 +396,12 @@ namespace puck.tests
             db2.Database.OpenConnection();
             db2.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db2);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -444,11 +470,12 @@ namespace puck.tests
             db2.Database.OpenConnection();
             db2.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db2);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -513,11 +540,12 @@ namespace puck.tests
             db2.Database.OpenConnection();
             db2.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db2);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -582,11 +610,12 @@ namespace puck.tests
             db2.Database.OpenConnection();
             db2.Database.EnsureCreated();
             var paramRepo = new RunParametersRepo(db2);
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -653,8 +682,9 @@ namespace puck.tests
             var runRepo = new RunResultRepo();
             var tempContainer = new TemperatureControllerContainer(tempMocks.ToDictionary(x => x.Key, x => (ITemperatureController)x.Value));
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: 1,
                     groupheadValveIO: 2,
@@ -729,8 +759,9 @@ namespace puck.tests
             var paramRepo = new RunParametersRepo(db2);
             var runRepo = new RunResultRepo();
             var logger = new Moq.Mock<ILogger<SystemService>>().Object;
+            var scopeFactory = new SingleServiceScopeFactory(paramRepo);
             var proxy = new SystemProxy(
-                logger, ioMock, tempContainer, pauseCont, pid, paramRepo, runRepo,
+                logger, ioMock, tempContainer, pauseCont, pid, scopeFactory, runRepo,
                 new SystemProxyConfiguration(
                     recircValveIO: recircValveIO,
                     groupheadValveIO: groupheadValveIO,

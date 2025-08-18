@@ -10,6 +10,7 @@ using System.Reactive.Subjects;
 using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Puck.Services
 {
@@ -115,7 +116,7 @@ namespace Puck.Services
         private readonly SemaphoreSlim _runScanLock;
         private readonly PauseContainer _pauseCont;
         private readonly PID _pid;
-        private readonly RunParametersRepo _paramRepo;
+        private readonly IServiceScopeFactory _scopeFactory;
         private readonly RunResultRepo _runRepo;
 
         private bool _isDisposed;
@@ -166,12 +167,12 @@ namespace Puck.Services
             TemperatureControllerContainer tempControllers,
             PauseContainer pauseCont,
             PID pid,
-            RunParametersRepo paramRepo,
+            IServiceScopeFactory scopeFactory,
             RunResultRepo runRepo,
             SystemProxyConfiguration options)
         {
             _runRepo = runRepo;
-            _paramRepo = paramRepo;
+            _scopeFactory = scopeFactory;
             _pid = pid;
             _pauseCont = pauseCont;
             _logger = logger;
@@ -223,6 +224,13 @@ namespace Puck.Services
             // Initialize default genetic auto-tune setpoint profile
             _simulatedAutoTuneSetpointProfile = BuildSimulatedAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
             _autoTuneSetpointProfile = BuildAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
+        }
+
+        private RunParameters? GetActiveParametersFromRepository()
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<RunParametersRepo>();
+            return repo.GetActiveParameters();
         }
 
         private ProcessDeviceState GetInitialProcessDeviceState()
@@ -350,7 +358,7 @@ namespace Puck.Services
                             }
 
                             var starttime = DateTime.UtcNow;
-                            var runParams = _paramRepo.GetActiveParameters();
+                            var runParams = GetActiveParametersFromRepository();
 
                             // Initialize run result tracking
                             currentRes = new RunResult();
@@ -749,7 +757,7 @@ namespace Puck.Services
             RunParameters? runParams,
             CancellationToken ct)
         {
-            var effectiveParams = runParams ?? _paramRepo.GetActiveParameters();
+            var effectiveParams = runParams ?? GetActiveParametersFromRepository();
             if (effectiveParams == null)
                 throw new Exception("No active run parameters are set");
             await ExecuteSystemActionAsync(() => RunInternalAsync(ct), ct);

@@ -76,7 +76,9 @@ builder
     .AddSingleton<SystemProxy>()
     .AddSingleton(sp =>
     {
-        var db = sp.GetRequiredService<PuckDbContext>();
+        // Resolve PID gains from DB in an isolated scope to avoid capturing scoped services
+        using var scope = sp.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PuckDbContext>();
         var profile = db.PidProfiles.OrderByDescending(p => p.CreatedUtc).FirstOrDefault();
         var kp = profile?.Kp ?? 1.0;
         var ki = profile?.Ki ?? 1.0;
@@ -86,7 +88,7 @@ builder
     })
     .AddSingleton<PauseContainer>()
     .AddSingleton<RunResultRepo>()
-    .AddSingleton<RunParametersRepo>()
+    .AddScoped<RunParametersRepo>()
     .AddSingleton(runParams)
     .AddHostedService<SystemService>();
 

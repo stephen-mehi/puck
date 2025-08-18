@@ -61,14 +61,14 @@ public class SystemController : ControllerBase
     private readonly ILogger<SystemController> _logger;
     private readonly SystemProxy _proxy;
     private readonly PauseContainer _pauseCont;
-    private readonly RunParametersRepo _runParamsRepo;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly RunResultRepo _runResultRepo;
 
     public SystemController(
         ILogger<SystemController> logger,
         SystemProxy proxy,
         PauseContainer pauseCont,
-        RunParametersRepo runParamsRepo,
+        IServiceScopeFactory scopeFactory,
         RunResultRepo runResultRepo,
         PuckDbContext db)
     {
@@ -76,7 +76,7 @@ public class SystemController : ControllerBase
         _logger = logger;
         _proxy = proxy;
         _pauseCont = pauseCont;
-        _runParamsRepo = runParamsRepo;
+        _scopeFactory = scopeFactory;
         _db = db;
     }
 
@@ -277,7 +277,10 @@ public class SystemController : ControllerBase
     {
         _logger.LogInformation("Posted run");
 
-        var profile = await _runParamsRepo.GetProfileAsync(runParamsId, ct);
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<RunParametersRepo>();
+            var profile = await repo.GetProfileAsync(runParamsId, ct);
         if (profile == null)
             return NotFound($"Run parameters not found for id '{runParamsId}'");
 
@@ -293,6 +296,7 @@ public class SystemController : ControllerBase
         };
         await _proxy.RunAsync(runParams, ct);
         return Ok("Set to run");
+        }
     }
 
     [HttpPost]
@@ -302,7 +306,12 @@ public class SystemController : ControllerBase
     {
         _logger.LogInformation("Posted run");
 
-        var runParams = _runParamsRepo.GetActiveParameters();
+        RunParameters? runParams;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<RunParametersRepo>();
+            runParams = repo.GetActiveParameters();
+        }
         if (runParams == null)
             return BadRequest("No active run parameters are set");
 
