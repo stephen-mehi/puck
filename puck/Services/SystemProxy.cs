@@ -951,159 +951,6 @@ namespace Puck.Services
         }
 
         /// <summary>
-        /// Runs a genetic auto-tuning routine against a simulated PT1 process that maps pump speed (output)
-        /// to group head pressure (feedback). Uses a representative multi-step setpoint profile to optimize
-        /// PID gains for tracking performance. Applies the tuned gains to the internal PID and returns them.
-        /// Note: This routine does not actuate hardware; it simulates the plant.
-        /// </summary>
-        /// <param name="dt">Simulation time step in seconds</param>
-        /// <param name="steps">Number of simulation steps</param>
-        /// <param name="processGain">PT1 process gain used in simulation</param>
-        /// <param name="options">Genetic tuner options; defaults are applied if null</param>
-        /// <returns>(Kp, Ki, Kd) tuned gains that were applied to the internal PID</returns>
-        public async Task<(double Kp, double Ki, double Kd)> AutoTuneSimulatedPidAsync(
-            CancellationToken ct,
-            double dt = 0.05,
-            int steps = 600,
-            double processGain = 10.0,
-            GeneticPidTuner.GeneticTunerOptions? options = null)
-        {
-            // Ensure exclusive access to system operations during tuning
-            await _systemLock.WaitAsync(ct);
-
-            try
-            {
-                // Use prebuilt profile if dt/steps match; otherwise build a temporary one
-                var setpointProfile = (Math.Abs(dt - _autoTuneDt) < 1e-12 && steps == _autoTuneSteps)
-                    ? _simulatedAutoTuneSetpointProfile
-                    : BuildSimulatedAutoTuneSetpointProfile(dt, steps);
-
-                // Cost weights (mirrors test config, modest penalties for overshoot, favor steady-state accuracy)
-                double iaeWeight = 1.0;
-                double overshootWeight = 200.0;
-                double steadyStateWeight = 300.0;
-                double finalErrorWeight = 400.0;
-                int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
-
-                // PT1 process simulation (pump speed -> pressure). Clamp actuator to [0,1].
-                PidEvalDelegate simDelegate = parameters =>
-                {
-                    double pressure = parameters.InitialProcessValue;
-
-                    var pid = new PID(
-                        kp: parameters.Kp,
-                        ki: parameters.Ki,
-                        kd: parameters.Kd,
-                        n: 10.0,
-                        outputUpperLimit: 1.0,
-                        outputLowerLimit: 0.0,
-                        tsMin: parameters.TimeStep,
-                        derivativeFilterAlpha: 0.2);
-
-                    double errorSum = 0;
-                    double maxOvershoot = 0;
-                    double steadyStateError = 0;
-                    double finalSteadyStateError = 0;
-                    double prevSp = double.NaN;
-                    int stepDir = 0; // +1 up, -1 down
-                    double[] errors = new double[steps];
-
-                    for (int i = 0; i < steps; i++)
-                    {
-                        double sp = setpointProfile[i];
-
-                        double output =
-                            pid
-                            .PID_iterate(sp, pressure, TimeSpan.FromSeconds(parameters.TimeStep));
-
-                        if (double.IsNaN(output) ||
-                            double.IsInfinity(output) ||
-                            double.IsNaN(pressure) ||
-                            double.IsInfinity(pressure))
-                        {
-                            return new PidResult { Cost = double.MaxValue };
-                        }
-
-                        // Actuator clamp 0..1
-                        double actuator = Math.Max(0.0, Math.Min(1.0, output));
-                        // PT1 update
-                        pressure += (processGain * (actuator - pressure)) * parameters.TimeStep;
-                        pressure = Math.Max(0.0, Math.Min(1.0, pressure));
-
-                        double err = Math.Abs(sp - pressure);
-                        errors[i] = err;
-                        errorSum += err * parameters.TimeStep;
-
-                        if (!double.IsNaN(prevSp) && Math.Abs(sp - prevSp) > 1e-9)
-                            stepDir = sp > prevSp ? 1 : -1;
-
-                        double overshoot = 0.0;
-
-                        if (stepDir > 0 && pressure > sp) overshoot = pressure - sp;
-                        else if (stepDir < 0 && pressure < sp) overshoot = sp - pressure;
-                        if (overshoot > maxOvershoot) maxOvershoot = overshoot;
-                        prevSp = sp;
-                    }
-
-                    for (int i = steps - steadyStateSamples; i < steps; i++)
-                        steadyStateError += errors[i];
-
-                    steadyStateError /= steadyStateSamples;
-
-                    for (int i = steps - 10; i < steps; i++)
-                        finalSteadyStateError += errors[i];
-
-                    finalSteadyStateError /= 10.0;
-
-                    double cost = iaeWeight * errorSum
-                                  + overshootWeight * maxOvershoot
-                                  + steadyStateWeight * steadyStateError
-                                  + finalErrorWeight * finalSteadyStateError;
-                    return new PidResult { Cost = cost };
-                };
-
-                var tuner = new GeneticPidTuner(seed: 42);
-                var baseParams = new PidParameters
-                {
-                    Setpoint = 1.0,
-                    SimulationTime = steps * dt,
-                    TimeStep = dt,
-                    InitialProcessValue = 0.0
-                };
-                options ??= new GeneticPidTuner.GeneticTunerOptions
-                {
-                    Generations = 250,
-                    PopulationSize = 120,
-                    KpRange = (0.1, 2.5),
-                    KiRange = (0.1, 2.5),
-                    KdRange = (0.0, 0.5),
-                    EliteFraction = 0.15,
-                    TournamentSize = 3,
-                    EvaluateInParallel = false,
-                    Patience = 80,
-                    MinImprovement = 1e-6,
-                    InitialMutationRate = 0.3,
-                    FinalMutationRate = 0.05,
-                    InitialMutationStrength = 0.3,
-                    FinalMutationStrength = 0.05
-                };
-
-                var (bestKp, bestKi, bestKd) = tuner.Tune(simDelegate, baseParams, options);
-
-                // Apply tuned gains and emit state change
-                _pid.SetGains(bestKp, bestKi, bestKd);
-                _stateDeltaSubject.OnNext(new PidParametersChanged(
-                    bestKp, bestKi, bestKd, _pid.N, _pid.OutputUpperLimit, _pid.OutputLowerLimit));
-
-                return (bestKp, bestKi, bestKd);
-            }
-            finally
-            {
-                _systemLock.Release();
-            }
-        }
-
-        /// <summary>
         /// Live genetic auto-tuning using actual IO: pump output as actuator and pressure sensor as feedback.
         /// This method actuates the pump; ensure safe test conditions. Evaluation is serialized and non-parallel.
         /// </summary>
@@ -1135,13 +982,13 @@ namespace Puck.Services
 
         public async Task<AutotuneResult> AutoTunePidGeneticLiveAsync(
             CancellationToken ct,
-            double dt = 0.1,
-            int steps = 120,
-            double maxSafePressurePsi = 50.0,
-            double targetPressurePsi = 30.0,
-            double maxPumpSpeed = 14,
-            double minPumpSpeed = 4,
-            GeneticPidTuner.GeneticTunerOptions? options = null)
+            GeneticTunerOptions options,
+            double dt,
+            int steps,
+            double maxSafePressurePsi,
+            double targetPressurePsi,
+            double maxPumpSpeed,
+            double minPumpSpeed)
         {
             await _systemLock.WaitAsync(ct);
 
@@ -1254,7 +1101,7 @@ namespace Puck.Services
                     TimeStep = dt,
                     InitialProcessValue = GetGroupHeadPressure() ?? 0.0
                 };
-                options ??= new GeneticPidTuner.GeneticTunerOptions
+                options ??= new GeneticTunerOptions
                 {
                     Generations = 5,
                     PopulationSize = 8,

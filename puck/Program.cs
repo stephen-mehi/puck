@@ -1,10 +1,11 @@
 
-using Puck.Services.TemperatureController;
-using Puck.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using puck.Services.IoBus;
 using puck.Services.PID;
-using Microsoft.EntityFrameworkCore;
+using Puck.Services;
 using Puck.Services.Persistence;
+using Puck.Services.TemperatureController;
 using System.Linq;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -51,6 +52,23 @@ builder
     .AddSingleton<FujiPXFDriverProvider>()
     .AddSingleton<TemperatureControllerConfiguration>()
     .AddSingleton<TemperatureControllerContainer>()
+    .AddSingleton(new GeneticTunerOptions
+    {
+        Generations = 100,
+        PopulationSize = 75,
+        KpRange = (0.1, 5),
+        KiRange = (0.1, 5),
+        KdRange = (0.0, 1),
+        EliteFraction = 0.15,
+        TournamentSize = 3,
+        EvaluateInParallel = false,
+        Patience = 80,
+        MinImprovement = 1e-6,
+        InitialMutationRate = 0.3,
+        FinalMutationRate = 0.05,
+        InitialMutationStrength = 0.3,
+        FinalMutationStrength = 0.05
+    })
     .AddSingleton(new SystemProxyConfiguration(
         recircValveIO: 1,
         groupheadValveIO: 2,
@@ -123,14 +141,15 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PuckDbContext>();
-    var hasMigrations = db.Database.GetMigrations().Any();
-    if (hasMigrations)
-        db.Database.Migrate();
-    else
-        db.Database.EnsureCreated();
+    //    var hasMigrations = db.Database.GetMigrations().Any();
+    //    if (hasMigrations)
+    //        db.Database.Migrate();
+    //    else
+
+    db.Database.EnsureCreated();
 }
 
-var reqLogger = 
+var reqLogger =
     app
     .Services
     .GetRequiredService<ILoggerFactory>()

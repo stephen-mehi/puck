@@ -1,9 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using puck.Services.PID;
 using Puck.Services;
 using Puck.Services.Persistence;
-using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.IO.Ports;
 using static Puck.Controllers.SystemController;
@@ -63,6 +64,7 @@ public class SystemController : ControllerBase
     private readonly PauseContainer _pauseCont;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly RunResultRepo _runResultRepo;
+    private readonly GeneticTunerOptions _tunerOptions;
 
     public SystemController(
         ILogger<SystemController> logger,
@@ -70,8 +72,10 @@ public class SystemController : ControllerBase
         PauseContainer pauseCont,
         IServiceScopeFactory scopeFactory,
         RunResultRepo runResultRepo,
-        PuckDbContext db)
+        PuckDbContext db,
+        GeneticTunerOptions tunerOptions)
     {
+        _tunerOptions = tunerOptions;
         _runResultRepo = runResultRepo;
         _logger = logger;
         _proxy = proxy;
@@ -137,6 +141,7 @@ public class SystemController : ControllerBase
     {
         var result = await _proxy.AutoTunePidGeneticLiveAsync(
             ct,
+            _tunerOptions,
             dt: req?.Dt ?? 0.1,
             steps: req?.Steps ?? 120,
             maxSafePressurePsi: req?.MaxSafePressurePsi ?? 50.0,
@@ -144,6 +149,7 @@ public class SystemController : ControllerBase
             maxPumpSpeed: req?.MaxPumpSpeed ?? 14.0,
             minPumpSpeed: req?.MinPumpSpeed ?? 4.0
         );
+
         // Replace any previous PID profile and associated runs so only one valid set exists
         var existingProfiles = await _db.PidProfiles.ToListAsync(ct);
         if (existingProfiles.Count > 0)

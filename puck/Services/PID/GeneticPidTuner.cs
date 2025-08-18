@@ -37,6 +37,24 @@ namespace puck.Services.PID
     /// <returns>Simulation result (cost, time series, etc.)</returns>
     public delegate PidResult PidEvalDelegate(PidParameters parameters);
 
+    public class GeneticTunerOptions
+    {
+        public int Generations { get; set; } = 50;
+        public int PopulationSize { get; set; } = 30;
+        public (double min, double max) KpRange { get; set; } = (0.0, 10.0);
+        public (double min, double max) KiRange { get; set; } = (0.0, 10.0);
+        public (double min, double max) KdRange { get; set; } = (0.0, 10.0);
+        public double EliteFraction { get; set; } = 0.1; // 10%
+        public int TournamentSize { get; set; } = 3;
+        public bool EvaluateInParallel { get; set; } = false;
+        public int Patience { get; set; } = 15; // early stop patience (generations)
+        public double MinImprovement { get; set; } = 1e-6; // relative improvement threshold
+        public double InitialMutationRate { get; set; } = 0.3;
+        public double FinalMutationRate { get; set; } = 0.05;
+        public double InitialMutationStrength { get; set; } = 0.3; // fraction of range
+        public double FinalMutationStrength { get; set; } = 0.05;
+    }
+
     /// <summary>
     /// Genetic algorithm-based PID tuner. Optimizes Kp, Ki, Kd for a given process simulation.
     /// Usage:
@@ -52,54 +70,36 @@ namespace puck.Services.PID
             _rand = seed.HasValue ? new Random(seed.Value) : new Random();
         }
 
-        public class GeneticTunerOptions
-        {
-            public int Generations { get; set; } = 50;
-            public int PopulationSize { get; set; } = 30;
-            public (double min, double max) KpRange { get; set; } = (0.0, 10.0);
-            public (double min, double max) KiRange { get; set; } = (0.0, 10.0);
-            public (double min, double max) KdRange { get; set; } = (0.0, 10.0);
-            public double EliteFraction { get; set; } = 0.1; // 10%
-            public int TournamentSize { get; set; } = 3;
-            public bool EvaluateInParallel { get; set; } = false;
-            public int Patience { get; set; } = 15; // early stop patience (generations)
-            public double MinImprovement { get; set; } = 1e-6; // relative improvement threshold
-            public double InitialMutationRate { get; set; } = 0.3;
-            public double FinalMutationRate { get; set; } = 0.05;
-            public double InitialMutationStrength { get; set; } = 0.3; // fraction of range
-            public double FinalMutationStrength { get; set; } = 0.05;
-        }
-
-        /// <summary>
-        /// Tune PID parameters using a genetic algorithm.
-        /// </summary>
-        /// <param name="simulateProcess">Delegate: simulates process and returns result (cost, etc.)</param>
-        /// <param name="baseParameters">Base simulation parameters (setpoint, sim time, etc.)</param>
-        /// <param name="generations">Number of generations</param>
-        /// <param name="populationSize">Population size</param>
-        /// <param name="kpRange">(min, max) for Kp</param>
-        /// <param name="kiRange">(min, max) for Ki</param>
-        /// <param name="kdRange">(min, max) for Kd</param>
-        /// <returns>Tuple of (Kp, Ki, Kd) with lowest cost</returns>
-        public (double Kp, double Ki, double Kd) Tune(
-            PidEvalDelegate simulateProcess,
-            PidParameters baseParameters,
-            int generations = 50,
-            int populationSize = 30,
-            (double min, double max)? kpRange = null,
-            (double min, double max)? kiRange = null,
-            (double min, double max)? kdRange = null)
-        {
-            var options = new GeneticTunerOptions
-            {
-                Generations = generations,
-                PopulationSize = populationSize,
-                KpRange = kpRange ?? (0.0, 10.0),
-                KiRange = kiRange ?? (0.0, 10.0),
-                KdRange = kdRange ?? (0.0, 10.0),
-            };
-            return Tune(simulateProcess, baseParameters, options);
-        }
+        ///// <summary>
+        ///// Tune PID parameters using a genetic algorithm.
+        ///// </summary>
+        ///// <param name="simulateProcess">Delegate: simulates process and returns result (cost, etc.)</param>
+        ///// <param name="baseParameters">Base simulation parameters (setpoint, sim time, etc.)</param>
+        ///// <param name="generations">Number of generations</param>
+        ///// <param name="populationSize">Population size</param>
+        ///// <param name="kpRange">(min, max) for Kp</param>
+        ///// <param name="kiRange">(min, max) for Ki</param>
+        ///// <param name="kdRange">(min, max) for Kd</param>
+        ///// <returns>Tuple of (Kp, Ki, Kd) with lowest cost</returns>
+        //public (double Kp, double Ki, double Kd) Tune(
+        //    PidEvalDelegate simulateProcess,
+        //    PidParameters baseParameters,
+        //    int generations = 50,
+        //    int populationSize = 30,
+        //    (double min, double max)? kpRange = null,
+        //    (double min, double max)? kiRange = null,
+        //    (double min, double max)? kdRange = null)
+        //{
+        //    var options = new GeneticTunerOptions
+        //    {
+        //        Generations = generations,
+        //        PopulationSize = populationSize,
+        //        KpRange = kpRange ?? (0.0, 10.0),
+        //        KiRange = kiRange ?? (0.0, 10.0),
+        //        KdRange = kdRange ?? (0.0, 10.0),
+        //    };
+        //    return Tune(simulateProcess, baseParameters, options);
+        //}
 
         public (double Kp, double Ki, double Kd) Tune(
             PidEvalDelegate simulateProcess,
