@@ -1209,15 +1209,13 @@ namespace Puck.Services
         //    return profile;
         //}
 
-        private static double[] BuildAutoTuneSetpointProfile(double dt, int steps)
+        private static double[] BuildAutoTuneSetpointProfile(int steps)
         {
             var profile = new double[steps];
-
+            int half = steps / 2;
             for (int i = 0; i < steps; i++)
-            {
-                if ((i/steps) < 0.5) profile[i] = 0.0;
-                else profile[i] = 0.5;
-            }
+                profile[i] = i < half ? 0.0 : 0.5;
+
             return profile;
         }
 
