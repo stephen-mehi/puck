@@ -142,8 +142,8 @@ public class SystemController : ControllerBase
         var result = await _proxy.AutoTunePidGeneticLiveAsync(
             ct,
             _tunerOptions,
-            dt: req?.Dt ?? 0.1,
-            steps: req?.Steps ?? 120,
+            dt: req?.Dt ?? .5,
+            steps: req?.Steps ?? 300,
             maxSafePressurePsi: req?.MaxSafePressurePsi ?? 50.0,
             targetPressurePsi: req?.TargetPressurePsi ?? 30.0,
             maxPumpSpeed: req?.MaxPumpSpeed ?? 14.0,

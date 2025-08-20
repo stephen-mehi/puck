@@ -152,13 +152,6 @@ namespace Puck.Services
         private readonly BehaviorSubject<ProcessDeviceState> _stateSubject;
         public IObservable<ProcessDeviceState> StateObservable => _stateSubject.AsObservable();
 
-        // Auto-tune configuration/profile (constructed once)
-        private readonly double _autoTuneDt = 0.05;
-        private readonly int _autoTuneSteps = 600;
-        private readonly double[] _simulatedAutoTuneSetpointProfile;
-        private readonly double[] _autoTuneSetpointProfile;
-
-
 
         // Overload: construct using options bag for all defaults
         public SystemProxy(
@@ -220,10 +213,6 @@ namespace Puck.Services
             });
             // Initialize connection state
             _stateDeltaSubject.OnNext(new ConnectionChanged(_ioProxy.IsCurrentlyConnected));
-
-            // Initialize default genetic auto-tune setpoint profile
-            _simulatedAutoTuneSetpointProfile = BuildSimulatedAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
-            _autoTuneSetpointProfile = BuildAutoTuneSetpointProfile(_autoTuneDt, _autoTuneSteps);
         }
 
         private RunParameters? GetActiveParametersFromRepository()
@@ -990,13 +979,13 @@ namespace Puck.Services
             double maxPumpSpeed,
             double minPumpSpeed)
         {
+            if(options == null) throw new ArgumentNullException(nameof(options));
+
             await _systemLock.WaitAsync(ct);
 
             try
             {
-                var setpointProfile = (Math.Abs(dt - _autoTuneDt) < 1e-12 && steps == _autoTuneSteps)
-                    ? _autoTuneSetpointProfile
-                    : BuildAutoTuneSetpointProfile(dt, steps);
+                var setpointProfile = BuildAutoTuneSetpointProfile(dt, steps);
 
                 double iaeWeight = 1.0;
                 double overshootWeight = 200.0;
@@ -1101,23 +1090,7 @@ namespace Puck.Services
                     TimeStep = dt,
                     InitialProcessValue = GetGroupHeadPressure() ?? 0.0
                 };
-                options ??= new GeneticTunerOptions
-                {
-                    Generations = 5,
-                    PopulationSize = 8,
-                    KpRange = (0.1, 2.5),
-                    KiRange = (0.1, 2.5),
-                    KdRange = (0.0, 0.5),
-                    EliteFraction = 0.25,
-                    TournamentSize = 3,
-                    EvaluateInParallel = false,
-                    Patience = 5,
-                    MinImprovement = 1e-3,
-                    InitialMutationRate = 0.3,
-                    FinalMutationRate = 0.1,
-                    InitialMutationStrength = 0.25,
-                    FinalMutationStrength = 0.1
-                };
+
                 options.EvaluateInParallel = false;
 
                 (double Kp, double Ki, double Kd) best;
@@ -1217,40 +1190,33 @@ namespace Puck.Services
             }
         }
 
-        private static double[] BuildSimulatedAutoTuneSetpointProfile(double dt, int steps)
-        {
-            var profile = new double[steps];
-            for (int i = 0; i < steps; i++)
-            {
-                double t = i * dt;
-                if (t < 5.0) profile[i] = 0.0;
-                else if (t < 15.0) profile[i] = 0.95;
-                else if (t < 25.0) profile[i] = 0.5;
-                else if (t < 35.0) profile[i] = 0.75;
-                else if (t < 45.0) profile[i] = 0.25;
-                else if (t < 55.0) profile[i] = 0.0;
-                else if (t < 65.0) profile[i] = 0.9;
-                else if (t < 75.0) profile[i] = 0.3;
-                else profile[i] = 0.7;
-            }
-            return profile;
-        }
+        //private static double[] BuildSimulatedAutoTuneSetpointProfile(double dt, int steps)
+        //{
+        //    var profile = new double[steps];
+        //    for (int i = 0; i < steps; i++)
+        //    {
+        //        double t = i * dt;
+        //        if (t < 5.0) profile[i] = 0.0;
+        //        else if (t < 15.0) profile[i] = 0.95;
+        //        else if (t < 25.0) profile[i] = 0.5;
+        //        else if (t < 35.0) profile[i] = 0.75;
+        //        else if (t < 45.0) profile[i] = 0.25;
+        //        else if (t < 55.0) profile[i] = 0.0;
+        //        else if (t < 65.0) profile[i] = 0.9;
+        //        else if (t < 75.0) profile[i] = 0.3;
+        //        else profile[i] = 0.7;
+        //    }
+        //    return profile;
+        //}
 
         private static double[] BuildAutoTuneSetpointProfile(double dt, int steps)
         {
             var profile = new double[steps];
+
             for (int i = 0; i < steps; i++)
             {
-                double t = i * dt;
-                if (t < 5.0) profile[i] = 0.0;
-                else if (t < 15.0) profile[i] = 0.9;
-                else if (t < 25.0) profile[i] = 0.5;
-                else if (t < 35.0) profile[i] = 0.75;
-                else if (t < 45.0) profile[i] = 0.25;
-                else if (t < 55.0) profile[i] = 0.0;
-                else if (t < 65.0) profile[i] = 0.9;
-                else if (t < 75.0) profile[i] = 0.3;
-                else profile[i] = 0.7;
+                if ((i/steps) < 0.5) profile[i] = 0.0;
+                else profile[i] = 0.5;
             }
             return profile;
         }
