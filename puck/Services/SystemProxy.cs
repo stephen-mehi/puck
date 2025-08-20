@@ -985,7 +985,7 @@ namespace Puck.Services
 
             try
             {
-                var setpointProfile = BuildAutoTuneSetpointProfile(dt, steps);
+                var setpointProfile = BuildAutoTuneSetpointProfile(steps);
 
                 double iaeWeight = 1.0;
                 double overshootWeight = 200.0;
