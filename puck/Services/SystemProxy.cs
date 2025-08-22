@@ -1196,10 +1196,16 @@ namespace Puck.Services
                                       + overshootWeight * maxOvershoot
                                       + steadyStateWeight * steadyStateError
                                       + finalErrorWeight * finalSteadyStateError;
+                        int evalId = Interlocked.Increment(ref evalCounter);
+                        _logger.LogInformation($"[Autotune] Eval {evalId}: IAE={errorSum:F4}*{iaeWeight} + Overshoot={maxOvershoot:F4}*{overshootWeight} + Steady={steadyStateError:F4}*{steadyStateWeight} + Final={finalSteadyStateError:F4}*{finalErrorWeight} => Cost={cost:F6}");
+
+
+
                         return new PidResult { Cost = cost };
                     }
-                    catch
+                    catch(Exception e)
                     {
+                        _logger.LogWarning($"Failed during eval. Exception: {e.Message}");
                         return new PidResult { Cost = double.MaxValue };
                         throw;
                     }
