@@ -979,12 +979,25 @@ namespace Puck.Services
             double maxPumpSpeed,
             double minPumpSpeed)
         {
-            if(options == null) throw new ArgumentNullException(nameof(options));
+            if (options == null) throw new ArgumentNullException(nameof(options));
 
             await _systemLock.WaitAsync(ct);
 
+            _logger.LogInformation($"[Autotune] Starting live GA autotune: dt={dt}s, steps={steps}, targetPsi={targetPressurePsi}, maxSafePsi={maxSafePressurePsi}, pump=[{minPumpSpeed},{maxPumpSpeed}]");
+
             try
             {
+                // Ensure a safe fluid path so the pump does not deadhead (and spike pressure)
+
+                await SetBackFlushValveStateClosedInternalAsync(ct);
+                // Tune pressure at grouphead under flow: open grouphead, close recirculation
+                await SetGroupHeadValveStateClosedInternalAsync(ct);
+                await SetRecirculationValveStateOpenInternalAsync(ct);
+
+
+                await ApplyPumpSpeedInternalAsync(minPumpSpeed + 0.5, ct);
+                await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.5, dt)), ct);
+
                 var setpointProfile = BuildAutoTuneSetpointProfile(steps);
 
                 double iaeWeight = 1.0;
@@ -993,7 +1006,16 @@ namespace Puck.Services
                 double finalErrorWeight = 400.0;
                 int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
 
-                PidEvalDelegate liveEvaluator = parameters =>
+                int evalCounter = 0;
+                // Temporarily apply conservative dynamics to the PID to avoid aggressive steps during tuning
+                double prevMaxOutputRate = _pid.MaxOutputRate;
+                double prevSetpointRampRate = _pid.SetpointRampRate;
+                double prevOutputFilterTau = _pid.OutputFilterTimeConstant;
+                // Ramp output across the allowed band in ~2-3 seconds; ramp setpoint similarly
+                _pid.MaxOutputRate = (maxPumpSpeed - minPumpSpeed) / 2.5; // units per second
+                _pid.SetpointRampRate = targetPressurePsi / 2.5; // psi per second
+                _pid.OutputFilterTimeConstant = Math.Max(0.0, Math.Min(1.0, 0.2));
+                PidEvalDelegate liveEvaluator = async (parameters, evalCt) =>
                 {
                     double prevUpper = _pid.OutputUpperLimit;
                     double prevLower = _pid.OutputLowerLimit;
@@ -1004,6 +1026,12 @@ namespace Puck.Services
                         _pid.ResetController();
                         // Temporarily sync PID output limits to requested pump speed range
                         _pid.SetOutputLimits(maxPumpSpeed, minPumpSpeed);
+
+                        // Start each evaluation at the minimum pump to avoid pressure spikes
+
+                        await ApplyPumpSpeedInternalAsync(minPumpSpeed, evalCt);
+                        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.5, dt)), evalCt);
+
 
                         double errorSum = 0;
                         double maxOvershoot = 0;
@@ -1017,7 +1045,7 @@ namespace Puck.Services
 
                         for (int i = 0; i < steps; i++)
                         {
-                            if (ct.IsCancellationRequested)
+                            if (evalCt.IsCancellationRequested)
                                 return new PidResult { Cost = double.MaxValue };
 
                             double sp = setpointProfile[i] * targetPressurePsi;
@@ -1027,7 +1055,8 @@ namespace Puck.Services
 
                             if (p.Value > maxSafePressurePsi)
                             {
-                                try { StopPumpInternalAsync(ct).GetAwaiter().GetResult(); } catch { }
+                                _logger.LogWarning($"[Autotune] Safety stop: pressure {p.Value}psi exceeded maxSafe {maxSafePressurePsi}psi during eval");
+                                await StopPumpInternalAsync(evalCt);
                                 return new PidResult { Cost = double.MaxValue };
                             }
 
@@ -1036,10 +1065,10 @@ namespace Puck.Services
                             prevTime = now;
                             //not using _pid.OutputUpperLimit here because override during tuning
                             double clampedU = Math.Max(minPumpSpeed, Math.Min(maxPumpSpeed, u));
-                            ApplyPumpSpeedInternalAsync(clampedU, ct).GetAwaiter().GetResult();
+                            await ApplyPumpSpeedInternalAsync(clampedU, evalCt);
 
                             // wait for next sample
-                            try { Task.Delay(TimeSpan.FromSeconds(dt), ct).Wait(ct); }
+                            try { await Task.Delay(TimeSpan.FromSeconds(dt), evalCt); }
                             catch { return new PidResult { Cost = double.MaxValue }; }
 
                             p = GetGroupHeadPressure();
@@ -1092,11 +1121,17 @@ namespace Puck.Services
                 };
 
                 options.EvaluateInParallel = false;
+                options.OnGenerationEvaluated = (gen, best) =>
+                {
+                    _logger.LogInformation($"[Autotune] Gen {gen}: best Cost={best.Cost:F6}, Kp={best.Kp:F4}, Ki={best.Ki:F4}, Kd={best.Kd:F4}");
+                };
 
                 (double Kp, double Ki, double Kd) best;
                 try
                 {
-                    best = geneticTuner.Tune(liveEvaluator, baseParams, options);
+                    _logger.LogInformation($"[Autotune] GA tuning started: gen={options.Generations}, pop={options.PopulationSize}");
+                    best = await geneticTuner.TuneAsync(liveEvaluator, baseParams, options, ct);
+                    _logger.LogInformation($"[Autotune] GA tuning finished. Best gains: Kp={best.Kp:F4}, Ki={best.Ki:F4}, Kd={best.Kd:F4}");
                 }
                 finally
                 {
@@ -1182,11 +1217,25 @@ namespace Puck.Services
                     Samples = samples
                 };
 
+                _logger.LogInformation($"[Autotune] Validation: IAE={result.Iae:F4}, MaxOvershoot={result.MaxOvershoot:F4}, SteadyStateError={result.SteadyStateError:F4}, FinalError={result.FinalSteadyStateError:F4}, Samples={result.Samples.Count}");
+
                 return result;
             }
             finally
             {
+                // Restore PID dynamics settings
+                try
+                {
+                    _pid.MaxOutputRate = prevMaxOutputRate;
+                    _pid.SetpointRampRate = prevSetpointRampRate;
+                    _pid.OutputFilterTimeConstant = prevOutputFilterTau;
+                }
+                catch { }
+
+                try { await StopPumpInternalAsync(ct); } catch { }
+                try { await SetAllIdleInternalAsync(ct); } catch { }
                 _systemLock.Release();
+                _logger.LogInformation("[Autotune] Completed live autotune session");
             }
         }
 

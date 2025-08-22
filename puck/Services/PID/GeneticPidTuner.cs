@@ -35,7 +35,7 @@ namespace puck.Services.PID
     /// </summary>
     /// <param name="parameters">Simulation parameters (setpoint, gains, etc.)</param>
     /// <returns>Simulation result (cost, time series, etc.)</returns>
-    public delegate PidResult PidEvalDelegate(PidParameters parameters);
+    public delegate Task<PidResult> PidEvalDelegate(PidParameters parameters, CancellationToken ct);
 
     public class GeneticTunerOptions
     {
@@ -53,6 +53,8 @@ namespace puck.Services.PID
         public double FinalMutationRate { get; set; } = 0.05;
         public double InitialMutationStrength { get; set; } = 0.3; // fraction of range
         public double FinalMutationStrength { get; set; } = 0.05;
+        // Optional per-generation progress hook: (generation, best (Kp,Ki,Kd,Cost))
+        public Action<int, (double Kp, double Ki, double Kd, double Cost)>? OnGenerationEvaluated { get; set; }
     }
 
     /// <summary>
@@ -70,41 +72,11 @@ namespace puck.Services.PID
             _rand = seed.HasValue ? new Random(seed.Value) : new Random();
         }
 
-        ///// <summary>
-        ///// Tune PID parameters using a genetic algorithm.
-        ///// </summary>
-        ///// <param name="simulateProcess">Delegate: simulates process and returns result (cost, etc.)</param>
-        ///// <param name="baseParameters">Base simulation parameters (setpoint, sim time, etc.)</param>
-        ///// <param name="generations">Number of generations</param>
-        ///// <param name="populationSize">Population size</param>
-        ///// <param name="kpRange">(min, max) for Kp</param>
-        ///// <param name="kiRange">(min, max) for Ki</param>
-        ///// <param name="kdRange">(min, max) for Kd</param>
-        ///// <returns>Tuple of (Kp, Ki, Kd) with lowest cost</returns>
-        //public (double Kp, double Ki, double Kd) Tune(
-        //    PidEvalDelegate simulateProcess,
-        //    PidParameters baseParameters,
-        //    int generations = 50,
-        //    int populationSize = 30,
-        //    (double min, double max)? kpRange = null,
-        //    (double min, double max)? kiRange = null,
-        //    (double min, double max)? kdRange = null)
-        //{
-        //    var options = new GeneticTunerOptions
-        //    {
-        //        Generations = generations,
-        //        PopulationSize = populationSize,
-        //        KpRange = kpRange ?? (0.0, 10.0),
-        //        KiRange = kiRange ?? (0.0, 10.0),
-        //        KdRange = kdRange ?? (0.0, 10.0),
-        //    };
-        //    return Tune(simulateProcess, baseParameters, options);
-        //}
-
-        public (double Kp, double Ki, double Kd) Tune(
+        public async Task<(double Kp, double Ki, double Kd)> TuneAsync(
             PidEvalDelegate simulateProcess,
             PidParameters baseParameters,
-            GeneticTunerOptions options)
+            GeneticTunerOptions options,
+            CancellationToken ct)
         {
             // Individual: (Kp, Ki, Kd, cost)
             var population = new List<(double Kp, double Ki, double Kd, double Cost)>();
@@ -130,8 +102,9 @@ namespace puck.Services.PID
                 double mutationStrength = Lerp(options.InitialMutationStrength, options.FinalMutationStrength, t);
 
                 // Evaluate
-                EvaluatePopulation(population, simulateProcess, baseParameters, options);
+                await EvaluatePopulationAsync(population, simulateProcess, baseParameters, options, ct);
                 population = population.OrderBy(x => x.Cost).ToList();
+                options.OnGenerationEvaluated?.Invoke(gen, population[0]);
 
                 // Early stopping check
                 double currentBest = population[0].Cost;
@@ -166,7 +139,7 @@ namespace puck.Services.PID
             }
 
             // Final evaluation and result
-            EvaluatePopulation(population, simulateProcess, baseParameters, options);
+            await EvaluatePopulationAsync(population, simulateProcess, baseParameters, options, ct);
             var best = population.OrderBy(x => x.Cost).First();
             return (best.Kp, best.Ki, best.Kd);
         }
@@ -235,25 +208,32 @@ namespace puck.Services.PID
             };
         }
 
-        private void EvaluatePopulation(
+        private async Task EvaluatePopulationAsync(
             List<(double Kp, double Ki, double Kd, double Cost)> population,
             PidEvalDelegate simulateProcess,
             PidParameters baseParameters,
-            GeneticTunerOptions options)
+            GeneticTunerOptions options,
+            CancellationToken ct)
         {
             if (options.EvaluateInParallel)
             {
-                System.Threading.Tasks.Parallel.For(0, population.Count, i =>
+                var tasks = new List<Task>();
+                for (int i = 0; i < population.Count; i++)
                 {
-                    var ind = population[i];
-                    var simParams = CloneParameters(baseParameters);
-                    simParams.Kp = ind.Kp;
-                    simParams.Ki = ind.Ki;
-                    simParams.Kd = ind.Kd;
-                    double cost = simulateProcess(simParams).Cost;
-                    if (double.IsNaN(cost) || double.IsInfinity(cost)) cost = double.MaxValue;
-                    population[i] = (ind.Kp, ind.Ki, ind.Kd, cost);
-                });
+                    int idx = i;
+                    tasks.Add(Task.Run(async () =>
+                    {
+                        var ind = population[idx];
+                        var simParams = CloneParameters(baseParameters);
+                        simParams.Kp = ind.Kp;
+                        simParams.Ki = ind.Ki;
+                        simParams.Kd = ind.Kd;
+                        double cost = (await simulateProcess(simParams, ct)).Cost;
+                        if (double.IsNaN(cost) || double.IsInfinity(cost)) cost = double.MaxValue;
+                        population[idx] = (ind.Kp, ind.Ki, ind.Kd, cost);
+                    }));
+                }
+                await Task.WhenAll(tasks);
             }
             else
             {
@@ -264,7 +244,7 @@ namespace puck.Services.PID
                     simParams.Kp = ind.Kp;
                     simParams.Ki = ind.Ki;
                     simParams.Kd = ind.Kd;
-                    double cost = simulateProcess(simParams).Cost;
+                    double cost = (await simulateProcess(simParams, ct)).Cost;
                     if (double.IsNaN(cost) || double.IsInfinity(cost)) cost = double.MaxValue;
                     population[i] = (ind.Kp, ind.Ki, ind.Kd, cost);
                 }

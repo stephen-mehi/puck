@@ -402,7 +402,7 @@ namespace puck.tests
         }
 
         [Fact]
-        public void PID_GeneticAutotune_Simulation()
+        public async Task PID_GeneticAutotune_Simulation()
         {
             double dt = 0.05;
             int steps = 800; // Increased to accommodate more perturbations
@@ -428,7 +428,7 @@ namespace puck.tests
             double minPump = 4.0;
             double maxPump = 20.0;
 
-            PidEvalDelegate simDelegate = parameters =>
+            PidEvalDelegate simDelegate = async (parameters, ct) =>
             {
                 var system = new SimulatedPumpPlant(
                     minActuationForPressure: 0.15,
@@ -508,7 +508,7 @@ namespace puck.tests
                 //if (maxOvershoot > costConfig.OvershootThreshold)
                 //    cost += costConfig.OvershootHardPenalty * (maxOvershoot - costConfig.OvershootThreshold);
 
-                return new PidResult { Cost = cost };
+                return await Task.FromResult(new PidResult { Cost = cost });
             };
 
             var tuner = new GeneticPidTuner(seed: 42);
@@ -539,7 +539,7 @@ namespace puck.tests
                 FinalMutationStrength = 0.05
             };
 
-            var (bestKp, bestKi, bestKd) = tuner.Tune(simDelegate, baseParams, options);
+            var (bestKp, bestKi, bestKd) = await tuner.TuneAsync(simDelegate, baseParams, options, CancellationToken.None);
 
             // --- BEFORE: Response to setpoint perturbations with bad PID coefficients ---
             var systemBefore = new SimulatedPumpPlant(0.15, 1.2, 1.0, 0.05, 0.30, 0.05, 0.15, 20.0, 60.0, 0.01, 0.03, 0.08, 0.01, 12, 42);
