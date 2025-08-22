@@ -985,6 +985,11 @@ namespace Puck.Services
 
             _logger.LogInformation($"[Autotune] Starting live GA autotune: dt={dt}s, steps={steps}, targetPsi={targetPressurePsi}, maxSafePsi={maxSafePressurePsi}, pump=[{minPumpSpeed},{maxPumpSpeed}]");
 
+            // Temporarily apply conservative dynamics to the PID to avoid aggressive steps during tuning
+            double prevMaxOutputRate = _pid.MaxOutputRate;
+            double prevSetpointRampRate = _pid.SetpointRampRate;
+            double prevOutputFilterTau = _pid.OutputFilterTimeConstant;
+
             try
             {
                 // Ensure a safe fluid path so the pump does not deadhead (and spike pressure)
@@ -1007,10 +1012,7 @@ namespace Puck.Services
                 int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
 
                 int evalCounter = 0;
-                // Temporarily apply conservative dynamics to the PID to avoid aggressive steps during tuning
-                double prevMaxOutputRate = _pid.MaxOutputRate;
-                double prevSetpointRampRate = _pid.SetpointRampRate;
-                double prevOutputFilterTau = _pid.OutputFilterTimeConstant;
+                
                 // Ramp output across the allowed band in ~2-3 seconds; ramp setpoint similarly
                 _pid.MaxOutputRate = (maxPumpSpeed - minPumpSpeed) / 2.5; // units per second
                 _pid.SetpointRampRate = targetPressurePsi / 2.5; // psi per second
