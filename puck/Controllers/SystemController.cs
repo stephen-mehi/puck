@@ -136,6 +136,23 @@ public class SystemController : ControllerBase
     }
 
     [HttpPost]
+    [Route("pressure-control/start")]
+    public async Task<IActionResult> PostStartPressureControl([FromQuery] double targetPressurePsi, [FromQuery] double? minPumpSpeed, [FromQuery] double? maxPumpSpeed, CancellationToken ct = default)
+    {
+        var min = minPumpSpeed ?? 4.0;
+        var max = maxPumpSpeed ?? 20.0;
+        await _proxy.StartPressureControlAsync(targetPressurePsi, min, max, ct);
+        return Ok(new { status = "started", targetPressurePsi, minPumpSpeed = min, maxPumpSpeed = max });
+    }
+
+    [HttpPost]
+    [Route("pressure-control/stop")]
+    public async Task<IActionResult> PostStopPressureControl(CancellationToken ct = default)
+    {
+        await _proxy.StopPressureControlAsync(ct);
+        return Ok(new { status = "stopped" });
+    }
+
     [Route("pid/autotune")]
     public async Task<IActionResult> PostAutoTuneLive([FromBody] AutotuneRequest req, CancellationToken ct = default)
     {

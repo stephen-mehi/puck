@@ -1,16 +1,17 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using puck.Services.IoBus;
 using puck.Services.PID;
+using Puck.Models;
 using Puck.Services.TemperatureController;
+using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using System.Runtime.CompilerServices;
 using System.Text;
-using Puck.Models;
-using System.Reactive.Subjects;
-using System.Reactive.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Puck.Services
 {
@@ -121,6 +122,8 @@ namespace Puck.Services
 
         private bool _isDisposed;
         private IDisposable? _connectionSub;
+        private readonly SemaphoreSlim _pressureLoopLock;
+        private CancellationTokenSource? _pressureLoopCts;
 
         // IO Mapping (configurable)
         private readonly ushort _recircValveIO;
@@ -175,6 +178,7 @@ namespace Puck.Services
             _runLock = new SemaphoreSlim(1, 1);
             _runScanLock = new SemaphoreSlim(1, 1);
             _ctSrc = new CancellationTokenSource();
+            _pressureLoopLock = new SemaphoreSlim(1, 1);
             // IO mapping
             _recircValveIO = options.RecircValveIO;
             _groupheadValveIO = options.GroupheadValveIO;
@@ -791,6 +795,89 @@ namespace Puck.Services
             return ExecuteSystemActionAsync(() => StopPumpInternalAsync(ct), ct);
         }
 
+        // --- Pressure control loop (public API) ---
+        public async Task StartPressureControlAsync(double targetPressurePsi, double minPumpSpeed, double maxPumpSpeed, CancellationToken ct)
+        {
+            if (targetPressurePsi < 0) throw new ArgumentOutOfRangeException(nameof(targetPressurePsi));
+            if (maxPumpSpeed <= minPumpSpeed) throw new ArgumentException("maxPumpSpeed must be > minPumpSpeed");
+
+            await _pressureLoopLock.WaitAsync(ct);
+            try
+            {
+                if (_pressureLoopCts != null)
+                    throw new Exception("Pressure control loop already running");
+
+                _pressureLoopCts = CancellationTokenSource.CreateLinkedTokenSource(ct, _ctSrc.Token);
+                var loopCt = _pressureLoopCts.Token;
+
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Clamp PID output to requested pump window
+                        double prevUpper = _pid.OutputUpperLimit;
+                        double prevLower = _pid.OutputLowerLimit;
+                        _pid.SetOutputLimits(maxPumpSpeed, minPumpSpeed);
+                        _stateDeltaSubject.OnNext(new PidParametersChanged(_pid.Kp, _pid.Ki, _pid.Kd, _pid.N, _pid.OutputUpperLimit, _pid.OutputLowerLimit));
+
+                        DateTime prevTime = DateTime.UtcNow;
+                        await ApplyPumpSpeedInternalAsync(minPumpSpeed, loopCt);
+
+                        while (!loopCt.IsCancellationRequested)
+                        {
+                            var now = DateTime.UtcNow;
+                            var p = GetGroupHeadPressure();
+                            if (!p.HasValue)
+                            {
+                                await Task.Delay(100, loopCt);
+                                prevTime = now;
+                                continue;
+                            }
+
+                            double u = _pid.PID_iterate(targetPressurePsi, p.Value, now - prevTime);
+                            prevTime = now;
+                            double clampedU = Math.Max(minPumpSpeed, Math.Min(maxPumpSpeed, u));
+                            await ApplyPumpSpeedInternalAsync(clampedU, loopCt);
+                            await Task.Delay(_pidLoopDelayMs, loopCt);
+                        }
+
+                        // Restore previous limits
+                        _pid.SetOutputLimits(prevUpper, prevLower);
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception e)
+                    {
+                        _logger.LogError(e, "Pressure control loop errored");
+                        throw;
+                    }
+                    finally
+                    {
+                        await StopPumpInternalAsync(CancellationToken.None); 
+                    }
+                }, loopCt);
+            }
+            finally
+            {
+                _pressureLoopLock.Release();
+            }
+        }
+
+        public async Task StopPressureControlAsync(CancellationToken ct)
+        {
+            await _pressureLoopLock.WaitAsync(ct);
+            try
+            {
+                if (_pressureLoopCts == null) return;
+                _pressureLoopCts.Cancel();
+                _pressureLoopCts.Dispose();
+                _pressureLoopCts = null;
+            }
+            finally
+            {
+                _pressureLoopLock.Release();
+            }
+        }
+
 
         //GROUPHEAD
         private async Task SetGroupHeadValveStateOpenInternalAsync(CancellationToken ct)
@@ -1001,7 +1088,7 @@ namespace Puck.Services
 
 
                 await ApplyPumpSpeedInternalAsync(minPumpSpeed + 0.5, ct);
-                await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.5, dt)), ct);
+                await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
                 var setpointProfile = BuildAutoTuneSetpointProfile(steps);
 
@@ -1031,8 +1118,8 @@ namespace Puck.Services
 
                         // Start each evaluation at the minimum pump to avoid pressure spikes
 
-                        await ApplyPumpSpeedInternalAsync(minPumpSpeed, evalCt);
-                        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0.5, dt)), evalCt);
+                        await ApplyPumpSpeedInternalAsync(minPumpSpeed + 0.5, evalCt);
+                        await Task.Delay(TimeSpan.FromSeconds(1), evalCt);
 
 
                         double errorSum = 0;
@@ -1048,12 +1135,18 @@ namespace Puck.Services
                         for (int i = 0; i < steps; i++)
                         {
                             if (evalCt.IsCancellationRequested)
+                            {
+                                _logger.LogWarning($"Eval was cancelled");
                                 return new PidResult { Cost = double.MaxValue };
+                            }
 
                             double sp = setpointProfile[i] * targetPressurePsi;
                             double? p = GetGroupHeadPressure();
                             if (!p.HasValue)
+                            {
+                                _logger.LogWarning($"Unable to get grouphead pressure");
                                 return new PidResult { Cost = double.MaxValue };
+                            }
 
                             if (p.Value > maxSafePressurePsi)
                             {
@@ -1070,12 +1163,14 @@ namespace Puck.Services
                             await ApplyPumpSpeedInternalAsync(clampedU, evalCt);
 
                             // wait for next sample
-                            try { await Task.Delay(TimeSpan.FromSeconds(dt), evalCt); }
-                            catch { return new PidResult { Cost = double.MaxValue }; }
+                            await Task.Delay(TimeSpan.FromSeconds(dt), evalCt); 
 
                             p = GetGroupHeadPressure();
                             if (!p.HasValue)
+                            {
+                                _logger.LogWarning($"Unable to get grouphead pressure");
                                 return new PidResult { Cost = double.MaxValue };
+                            }
 
                             double e = Math.Abs(sp - p.Value);
                             errors[i] = e;
@@ -1106,6 +1201,7 @@ namespace Puck.Services
                     catch
                     {
                         return new PidResult { Cost = double.MaxValue };
+                        throw;
                     }
                     finally
                     {
