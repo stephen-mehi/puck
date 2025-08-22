@@ -153,11 +153,13 @@ public class SystemController : ControllerBase
         return Ok(new { status = "stopped" });
     }
 
+    [HttpPost]
     [Route("pid/autotune")]
     public async Task<IActionResult> PostAutoTuneLive([FromBody] AutotuneRequest req, CancellationToken ct = default)
     {
+        // Run autotune without tying it to the HTTP cancellation token to avoid request timeouts
         var result = await _proxy.AutoTunePidGeneticLiveAsync(
-            ct,
+            CancellationToken.None,
             _tunerOptions,
             dt: req?.Dt ?? .5,
             steps: req?.Steps ?? 300,
@@ -168,11 +170,11 @@ public class SystemController : ControllerBase
         );
 
         // Replace any previous PID profile and associated runs so only one valid set exists
-        var existingProfiles = await _db.PidProfiles.ToListAsync(ct);
+        var existingProfiles = await _db.PidProfiles.ToListAsync(CancellationToken.None);
         if (existingProfiles.Count > 0)
         {
             _db.PidProfiles.RemoveRange(existingProfiles);
-            await _db.SaveChangesAsync(ct);
+            await _db.SaveChangesAsync(CancellationToken.None);
         }
 
         var profile = new PidProfile
@@ -184,7 +186,7 @@ public class SystemController : ControllerBase
             Notes = "Set by live autotune"
         };
         _db.PidProfiles.Add(profile);
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(CancellationToken.None);
 
         var run = new PidAutotuneRun
         {
@@ -205,7 +207,7 @@ public class SystemController : ControllerBase
             CompletedUtc = DateTime.UtcNow
         };
         _db.PidAutotuneRuns.Add(run);
-        await _db.SaveChangesAsync(ct);
+        await _db.SaveChangesAsync(CancellationToken.None);
 
         if (result.Samples != null)
         {
@@ -221,7 +223,7 @@ public class SystemController : ControllerBase
                 ClampedLower = s.ClampedLower
             }).ToList();
             _db.PidAutotuneSamples.AddRange(entities);
-            await _db.SaveChangesAsync(ct);
+            await _db.SaveChangesAsync(CancellationToken.None);
         }
 
         return Ok(new { result.Kp, result.Ki, result.Kd, Samples = result.Samples });
