@@ -73,7 +73,7 @@ namespace puck.Services.PID
         }
 
         public async Task<(double Kp, double Ki, double Kd)> TuneAsync(
-            PidEvalDelegate simulateProcess,
+            PidEvalDelegate process,
             PidParameters baseParameters,
             GeneticTunerOptions options,
             CancellationToken ct)
@@ -102,7 +102,7 @@ namespace puck.Services.PID
                 double mutationStrength = Lerp(options.InitialMutationStrength, options.FinalMutationStrength, t);
 
                 // Evaluate
-                await EvaluatePopulationAsync(population, simulateProcess, baseParameters, options, ct);
+                await EvaluatePopulationAsync(population, process, baseParameters, options, ct);
                 population = population.OrderBy(x => x.Cost).ToList();
                 options.OnGenerationEvaluated?.Invoke(gen, population[0]);
 
@@ -139,7 +139,7 @@ namespace puck.Services.PID
             }
 
             // Final evaluation and result
-            await EvaluatePopulationAsync(population, simulateProcess, baseParameters, options, ct);
+            await EvaluatePopulationAsync(population, process, baseParameters, options, ct);
             var best = population.OrderBy(x => x.Cost).First();
             return (best.Kp, best.Ki, best.Kd);
         }

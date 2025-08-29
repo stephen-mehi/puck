@@ -1086,16 +1086,18 @@ namespace Puck.Services
                 await SetGroupHeadValveStateClosedInternalAsync(ct);
                 await SetRecirculationValveStateOpenInternalAsync(ct);
 
-
+                //set initial pump speed to avoid weird initial conditions
                 await ApplyPumpSpeedInternalAsync(minPumpSpeed + 0.5, ct);
                 await Task.Delay(TimeSpan.FromSeconds(1), ct);
 
                 var setpointProfile = BuildAutoTuneSetpointProfile(steps);
 
+                //integral absolute error
                 double iaeWeight = 1.0;
                 double overshootWeight = 200.0;
                 double steadyStateWeight = 300.0;
                 double finalErrorWeight = 400.0;
+                //get 5 percent of steps, at least 1
                 int steadyStateSamples = Math.Max(1, (int)(0.05 * steps));
 
                 int evalCounter = 0;
@@ -1103,7 +1105,7 @@ namespace Puck.Services
                 // Ramp output across the allowed band in ~2-3 seconds; ramp setpoint similarly
                 _pid.MaxOutputRate = (maxPumpSpeed - minPumpSpeed) / 2.5; // units per second
                 _pid.SetpointRampRate = targetPressurePsi / 2.5; // psi per second
-                _pid.OutputFilterTimeConstant = Math.Max(0.0, Math.Min(1.0, 0.2));
+                _pid.OutputFilterTimeConstant = 0.2;
                 PidEvalDelegate liveEvaluator = async (parameters, evalCt) =>
                 {
                     double prevUpper = _pid.OutputUpperLimit;
@@ -1188,9 +1190,10 @@ namespace Puck.Services
                         for (int i = steps - steadyStateSamples; i < steps; i++)
                             steadyStateError += errors[i];
                         steadyStateError /= steadyStateSamples;
-                        for (int i = steps - 10; i < steps; i++)
+                        int tail = Math.Min(10, steps);
+                        for (int i = steps - tail; i < steps; i++)
                             finalSteadyStateError += errors[i];
-                        finalSteadyStateError /= 10.0;
+                        finalSteadyStateError /= tail;
 
                         double cost = iaeWeight * errorSum
                                       + overshootWeight * maxOvershoot
@@ -1224,7 +1227,11 @@ namespace Puck.Services
                     InitialProcessValue = GetGroupHeadPressure() ?? 0.0
                 };
 
-                options.EvaluateInParallel = false;
+                if (options.EvaluateInParallel)
+                {
+                    _logger.LogWarning("[Autotune] Parallel GA evaluation is not supported for live tuning; forcing sequential.");
+                    options.EvaluateInParallel = false;
+                }
                 options.OnGenerationEvaluated = (gen, best) =>
                 {
                     _logger.LogInformation($"[Autotune] Gen {gen}: best Cost={best.Cost:F6}, Kp={best.Kp:F4}, Ki={best.Ki:F4}, Kd={best.Kd:F4}");
@@ -1366,8 +1373,10 @@ namespace Puck.Services
         {
             var profile = new double[steps];
             int half = steps / 2;
+
+            // Simple step profile: first half low, second half high
             for (int i = 0; i < steps; i++)
-                profile[i] = i < half ? 0.0 : 0.5;
+                profile[i] = i < half ? 0.1 : 0.5;
 
             return profile;
         }

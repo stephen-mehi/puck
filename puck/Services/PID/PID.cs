@@ -120,9 +120,8 @@ public class PID : IPID
     private double _tsMin;
     // Setpoint weighting
     private readonly double _proportionalSetpointWeight;
-    private readonly double _derivativeSetpointWeight;
-    // Derivative filter alpha (0 < alpha < 1)
-    private double _derivativeFilterAlpha;
+    // Derivative filter using standard first-order "dirty derivative" with coefficient N
+    // d_filtered += alpha * (d_raw - d_filtered), where alpha = Ts / (1/N + Ts)
     // Output rate limit (units per second)
     private double _maxOutputRate;
     // Setpoint ramp rate (units per second)
@@ -158,7 +157,7 @@ public class PID : IPID
     /// <param name="kp">Proportional Gain</param>
     /// <param name="ki">Integral Gain</param>
     /// <param name="kd">Derivative Gain</param>
-    /// <param name="n">Derivative Filter Coefficient</param>
+    /// <param name="n">Derivative filter coefficient (rad/s). Larger N = less filtering.</param>
     /// <param name="outputUpperLimit">Controller Upper Output Limit</param>
     /// <param name="outputLowerLimit">Controller Lower Output Limit</param>
     /// <param name="tsMin">Minimum allowed sample period (seconds)</param>
@@ -201,8 +200,7 @@ public class PID : IPID
         OutputLowerLimit = outputLowerLimit;
         _tsMin = tsMin;
         _proportionalSetpointWeight = proportionalSetpointWeight;
-        _derivativeSetpointWeight = derivativeSetpointWeight;
-        _derivativeFilterAlpha = derivativeFilterAlpha;
+        // derivativeSetpointWeight not used (DoM). Keep N for filtering; Alpha path deprecated.
         _maxOutputRate = maxOutputRate;
         _setpointRampRate = setpointRampRate;
         _deadband = deadband;
@@ -253,7 +251,8 @@ public class PID : IPID
     /// <summary>
     /// Set the derivative filter alpha (0 < alpha < 1).
     /// </summary>
-    public double DerivativeFilterAlpha { get => _derivativeFilterAlpha; set { if (value > 0 && value < 1) _derivativeFilterAlpha = value; } }
+    // Deprecated: kept for API compatibility, unused in filtering path
+    public double DerivativeFilterAlpha { get => 0; set { /* no-op */ } }
 
     /// <summary>
     /// Set the output rate limit (units/sec, 0 disables).
@@ -346,23 +345,25 @@ public class PID : IPID
                     rawDerivative = 0;
                 }
             }
+            // Dirty derivative filter using N
+            double alpha = _samplePeriod / (1.0 / Math.Max(N, double.Epsilon) + _samplePeriod);
             double filteredDerivative = inDeadband
-                ? _lastDerivative // do not update derivative state within deadband
-                : _derivativeFilterAlpha * rawDerivative + (1 - _derivativeFilterAlpha) * _lastDerivative;
+                ? _lastDerivative
+                : _lastDerivative + alpha * (rawDerivative - _lastDerivative);
             if (!inDeadband)
             {
                 _lastDerivative = filteredDerivative;
             }
 
             // Bumpless transfer on significant setpoint change (prevents output jump)
-            if (!double.IsNaN(_prevSetpointForBumpless) && Math.Abs(setPoint - _prevSetpointForBumpless) > _bumplessSetpointThreshold && Ki > 0)
+            if (!double.IsNaN(_prevSetpointForBumpless) && Math.Abs(rampedSetpoint - _prevSetpointForBumpless) > _bumplessSetpointThreshold && Ki > 0)
             {
                 double proportionalTerm = Kp * proportionalError;
-                double derivativeTerm = Kd * (inDeadband ? _lastDerivative : ( _derivativeFilterAlpha * rawDerivative + (1 - _derivativeFilterAlpha) * _lastDerivative ));
+                double derivativeTerm = Kd * _lastDerivative;
                 double desiredUnclamped = _lastOutput;
                 _integral = (desiredUnclamped - _feedforward - proportionalTerm - derivativeTerm) / Ki;
             }
-            _prevSetpointForBumpless = setPoint;
+            _prevSetpointForBumpless = rampedSetpoint;
 
             // Bumpless transfer on gain changes
             if ((Kp != _lastKp || Ki != _lastKi || Kd != _lastKd) && Ki > 0)
@@ -387,15 +388,15 @@ public class PID : IPID
             if (output > OutputUpperLimit)
             {
                 output = OutputUpperLimit;
-                // Back-calculation anti-windup: bleed off integral
-                if (integrate && Ki > 0)
+                // Back-calculation anti-windup: bleed off integral (unconditional when clamped)
+                if (Ki > 0)
                     _integral = previousIntegral + (OutputUpperLimit - unclampedOutput) / Ki;
                 WindupAlarm = true;
             }
             else if (output < OutputLowerLimit)
             {
                 output = OutputLowerLimit;
-                if (integrate && Ki > 0)
+                if (Ki > 0)
                     _integral = previousIntegral + (OutputLowerLimit - unclampedOutput) / Ki;
                 WindupAlarm = true;
             }
@@ -422,7 +423,9 @@ public class PID : IPID
             _lastOutput = output;
 
             // Instability alarm: detect oscillation or excessive output
-            InstabilityAlarm = Math.Abs(output) >= 0.95 * Math.Max(Math.Abs(OutputUpperLimit), Math.Abs(OutputLowerLimit));
+            // Instability alarm relative to the sign-relevant reachable bound
+            double bound = output >= 0 ? OutputUpperLimit : OutputLowerLimit;
+            InstabilityAlarm = Math.Abs(output) >= 0.95 * Math.Abs(bound);
 
             return output;
         }
@@ -480,6 +483,7 @@ public class PID : IPID
             OutputLowerLimit = lower;
             // Keep last output within new bounds to avoid large jumps
             _lastOutput = Math.Max(OutputLowerLimit, Math.Min(OutputUpperLimit, _lastOutput));
+            _lastFilteredOutput = Math.Max(OutputLowerLimit, Math.Min(OutputUpperLimit, _lastFilteredOutput));
         }
     }
 }
