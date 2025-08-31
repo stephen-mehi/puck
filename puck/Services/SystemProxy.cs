@@ -1376,7 +1376,7 @@ namespace Puck.Services
 
             // Simple step profile: first half low, second half high
             for (int i = 0; i < steps; i++)
-                profile[i] = i < half ? 0.1 : 0.5;
+                profile[i] = i < half ? 0.5 : 1;
 
             return profile;
         }

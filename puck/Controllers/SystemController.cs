@@ -163,8 +163,8 @@ public class SystemController : ControllerBase
             _tunerOptions,
             dt: req?.Dt ?? .05,
             steps: req?.Steps ?? 800,
-            maxSafePressurePsi: req?.MaxSafePressurePsi ?? 50.0,
-            targetPressurePsi: req?.TargetPressurePsi ?? 30.0,
+            maxSafePressurePsi: req?.MaxSafePressurePsi ?? 65.0,
+            targetPressurePsi: req?.TargetPressurePsi ?? 40.0,
             maxPumpSpeed: req?.MaxPumpSpeed ?? 14.0,
             minPumpSpeed: req?.MinPumpSpeed ?? 4.0
         );
