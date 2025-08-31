@@ -6,6 +6,8 @@ using Puck.Services;
 using Puck.Services.Persistence;
 using Xunit;
 
+namespace puck.tests;
+
 public class PersistenceTests
 {
     private static PuckDbContext CreateInMemoryDb()

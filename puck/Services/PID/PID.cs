@@ -150,6 +150,8 @@ public class PID : IPID
     // Optional output low-pass filter (time constant in seconds; 0 disables)
     private double _outputFilterTimeConstant = 0.0;
     private double _lastFilteredOutput = 0.0;
+    // Derivative filter alpha (0 < alpha < 1)
+    private double _derivativeFilterAlpha;
 
     /// <summary>
     /// PID Constructor
@@ -200,7 +202,7 @@ public class PID : IPID
         OutputLowerLimit = outputLowerLimit;
         _tsMin = tsMin;
         _proportionalSetpointWeight = proportionalSetpointWeight;
-        // derivativeSetpointWeight not used (DoM). Keep N for filtering; Alpha path deprecated.
+        // derivativeSetpointWeight not used (DoM).
         _maxOutputRate = maxOutputRate;
         _setpointRampRate = setpointRampRate;
         _deadband = deadband;
@@ -211,6 +213,7 @@ public class PID : IPID
         _lastKi = Ki;
         _lastKd = Kd;
         _lastFilteredOutput = 0.0;
+        _derivativeFilterAlpha = derivativeFilterAlpha;
     }
 
     /// <summary>
@@ -249,10 +252,18 @@ public class PID : IPID
     public double Feedforward { get => _feedforward; set => _feedforward = value; }
 
     /// <summary>
-    /// Set the derivative filter alpha (0 < alpha < 1).
+    /// Derivative filter alpha (0 < alpha < 1).
+    /// Larger alpha = less smoothing (closer to raw derivative).
     /// </summary>
-    // Deprecated: kept for API compatibility, unused in filtering path
-    public double DerivativeFilterAlpha { get => 0; set { /* no-op */ } }
+    public double DerivativeFilterAlpha
+    {
+        get => _derivativeFilterAlpha;
+        set
+        {
+            if (value <= 0 || value >= 1) throw new ArgumentException("Derivative filter alpha must be between 0 and 1.");
+            _derivativeFilterAlpha = value;
+        }
+    }
 
     /// <summary>
     /// Set the output rate limit (units/sec, 0 disables).
@@ -345,8 +356,8 @@ public class PID : IPID
                     rawDerivative = 0;
                 }
             }
-            // Dirty derivative filter using N
-            double derivativeAlpha = _samplePeriod / (1.0 / Math.Max(N, double.Epsilon) + _samplePeriod);
+            // Derivative filter using configured alpha
+            double derivativeAlpha = _derivativeFilterAlpha;
             double filteredDerivative = inDeadband
                 ? _lastDerivative
                 : _lastDerivative + derivativeAlpha * (rawDerivative - _lastDerivative);
@@ -388,15 +399,15 @@ public class PID : IPID
             if (output > OutputUpperLimit)
             {
                 output = OutputUpperLimit;
-                // Back-calculation anti-windup: bleed off integral (unconditional when clamped)
-                if (Ki > 0)
+                // Back-calculation anti-windup: only adjust when integration is enabled
+                if (Ki > 0 && integrate)
                     _integral = previousIntegral + (OutputUpperLimit - unclampedOutput) / Ki;
                 WindupAlarm = true;
             }
             else if (output < OutputLowerLimit)
             {
                 output = OutputLowerLimit;
-                if (Ki > 0)
+                if (Ki > 0 && integrate)
                     _integral = previousIntegral + (OutputLowerLimit - unclampedOutput) / Ki;
                 WindupAlarm = true;
             }
