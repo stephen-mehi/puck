@@ -346,10 +346,10 @@ public class PID : IPID
                 }
             }
             // Dirty derivative filter using N
-            double alpha = _samplePeriod / (1.0 / Math.Max(N, double.Epsilon) + _samplePeriod);
+            double derivativeAlpha = _samplePeriod / (1.0 / Math.Max(N, double.Epsilon) + _samplePeriod);
             double filteredDerivative = inDeadband
                 ? _lastDerivative
-                : _lastDerivative + alpha * (rawDerivative - _lastDerivative);
+                : _lastDerivative + derivativeAlpha * (rawDerivative - _lastDerivative);
             if (!inDeadband)
             {
                 _lastDerivative = filteredDerivative;
@@ -411,8 +411,8 @@ public class PID : IPID
             // Optional output low-pass filtering
             if (_outputFilterTimeConstant > 0)
             {
-                double alpha = _samplePeriod / (_outputFilterTimeConstant + _samplePeriod);
-                output = _lastFilteredOutput + alpha * (output - _lastFilteredOutput);
+                double outputAlpha = _samplePeriod / (_outputFilterTimeConstant + _samplePeriod);
+                output = _lastFilteredOutput + outputAlpha * (output - _lastFilteredOutput);
                 // Re-clamp after filtering to enforce bounds strictly
                 output = Math.Max(OutputLowerLimit, Math.Min(OutputUpperLimit, output));
                 _lastFilteredOutput = output;
