@@ -157,11 +157,11 @@ public class SystemController : ControllerBase
     [Route("pid/autotune")]
     public async Task<IActionResult> PostAutoTuneLive([FromBody] AutotuneRequest req, CancellationToken ct = default)
     {
-        var dt = req?.Dt ?? .05;
+        var dt = req?.Dt ?? .1;
         var steps = req?.Steps ?? 800;
         var maxSafePressurePsi = req?.MaxSafePressurePsi ?? 65.0;
         var targetPressurePsi = req?.TargetPressurePsi ?? 40.0;
-        var maxPumpSpeed = req?.MaxPumpSpeed ?? 14.0;
+        var maxPumpSpeed = req?.MaxPumpSpeed ?? 7.0;
         var minPumpSpeed = req?.MinPumpSpeed ?? 4.0;
 
         // Run autotune without tying it to the HTTP cancellation token to avoid request timeouts
