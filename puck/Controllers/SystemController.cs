@@ -157,16 +157,23 @@ public class SystemController : ControllerBase
     [Route("pid/autotune")]
     public async Task<IActionResult> PostAutoTuneLive([FromBody] AutotuneRequest req, CancellationToken ct = default)
     {
+        var dt = req?.Dt ?? .05;
+        var steps = req?.Steps ?? 800;
+        var maxSafePressurePsi = req?.MaxSafePressurePsi ?? 65.0;
+        var targetPressurePsi = req?.TargetPressurePsi ?? 40.0;
+        var maxPumpSpeed = req?.MaxPumpSpeed ?? 14.0;
+        var minPumpSpeed = req?.MinPumpSpeed ?? 4.0;
+
         // Run autotune without tying it to the HTTP cancellation token to avoid request timeouts
         var result = await _proxy.AutoTunePidGeneticLiveAsync(
             CancellationToken.None,
             _tunerOptions,
-            dt: req?.Dt ?? .05,
-            steps: req?.Steps ?? 800,
-            maxSafePressurePsi: req?.MaxSafePressurePsi ?? 65.0,
-            targetPressurePsi: req?.TargetPressurePsi ?? 40.0,
-            maxPumpSpeed: req?.MaxPumpSpeed ?? 14.0,
-            minPumpSpeed: req?.MinPumpSpeed ?? 4.0
+            dt,
+            steps,
+            maxSafePressurePsi,
+            targetPressurePsi,
+            maxPumpSpeed,
+            minPumpSpeed
         );
 
         // Replace any previous PID profile and associated runs so only one valid set exists
@@ -191,12 +198,12 @@ public class SystemController : ControllerBase
         var run = new PidAutotuneRun
         {
             PidProfileId = profile.Id,
-            DtSeconds = req?.Dt ?? 0.1,
-            Steps = req?.Steps ?? 120,
-            TargetPressurePsi = req?.TargetPressurePsi ?? 30.0,
-            MaxSafePressurePsi = req?.MaxSafePressurePsi ?? 50.0,
-            MinPumpSpeed = req?.MinPumpSpeed ?? 4.0,
-            MaxPumpSpeed = req?.MaxPumpSpeed ?? 14.0,
+            DtSeconds = dt,
+            Steps = steps,
+            TargetPressurePsi = targetPressurePsi,
+            MaxSafePressurePsi = maxSafePressurePsi,
+            MinPumpSpeed = minPumpSpeed,
+            MaxPumpSpeed = maxPumpSpeed,
             BestKp = result.Kp,
             BestKi = result.Ki,
             BestKd = result.Kd,
@@ -251,10 +258,18 @@ public class SystemController : ControllerBase
 
     [HttpPost]
     [Route("pump/run")]
-    public async Task<IActionResult> PostRunPump(CancellationToken ct = default)
+    public async Task<IActionResult> PostRunPump(
+        double speed,
+        CancellationToken ct = default)
     {
         _logger.LogInformation("Posted run pump");
-        await _proxy.ApplyPumpSpeedAsync(5, ct);
+
+        if (speed < 4 || speed > 20)
+        {
+            throw new Exception($"Specified speed must be between 4 and 20. Specified speed: {speed}");
+        }
+
+        await _proxy.ApplyPumpSpeedAsync(speed, ct);
         return Ok("pump running");
     }
 
@@ -306,21 +321,21 @@ public class SystemController : ControllerBase
         {
             var repo = scope.ServiceProvider.GetRequiredService<RunParametersRepo>();
             var profile = await repo.GetProfileAsync(runParamsId, ct);
-        if (profile == null)
-            return NotFound($"Run parameters not found for id '{runParamsId}'");
+            if (profile == null)
+                return NotFound($"Run parameters not found for id '{runParamsId}'");
 
-        var runParams = new RunParameters
-        {
-            InitialPumpSpeed = profile.InitialPumpSpeed,
-            GroupHeadTemperatureFarenheit = profile.GroupHeadTemperatureFarenheit,
-            ThermoblockTemperatureFarenheit = profile.ThermoblockTemperatureFarenheit,
-            PreExtractionTargetTemperatureFarenheit = profile.PreExtractionTargetTemperatureFarenheit,
-            ExtractionWeightGrams = profile.ExtractionWeightGrams,
-            MaxExtractionSeconds = profile.MaxExtractionSeconds,
-            TargetPressureBar = profile.TargetPressureBar
-        };
-        await _proxy.RunAsync(runParams, ct);
-        return Ok("Set to run");
+            var runParams = new RunParameters
+            {
+                InitialPumpSpeed = profile.InitialPumpSpeed,
+                GroupHeadTemperatureFarenheit = profile.GroupHeadTemperatureFarenheit,
+                ThermoblockTemperatureFarenheit = profile.ThermoblockTemperatureFarenheit,
+                PreExtractionTargetTemperatureFarenheit = profile.PreExtractionTargetTemperatureFarenheit,
+                ExtractionWeightGrams = profile.ExtractionWeightGrams,
+                MaxExtractionSeconds = profile.MaxExtractionSeconds,
+                TargetPressureBar = profile.TargetPressureBar
+            };
+            await _proxy.RunAsync(runParams, ct);
+            return Ok("Set to run");
         }
     }
 

@@ -56,8 +56,8 @@ builder
     {
         Generations = 100,
         PopulationSize = 75,
-        KpRange = (0.1, 5),
-        KiRange = (0.1, 5),
+        KpRange = (0.1, 2),
+        KiRange = (0.1, 2),
         KdRange = (0.0, 1),
         EliteFraction = 0.15,
         TournamentSize = 3,
