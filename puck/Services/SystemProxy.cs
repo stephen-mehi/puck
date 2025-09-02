@@ -1102,10 +1102,16 @@ namespace Puck.Services
 
                 int evalCounter = 0;
                 
+                // Configure controller to align with loop dt and sampling assumptions
+                _pid.NominalSamplePeriod = dt;
+                _pid.InputFilterTimeConstant = Math.Max(0.0, 0.02); // modest anti-aliasing (20 ms)
+
                 // Ramp output across the allowed band in ~2-3 seconds; ramp setpoint similarly
                 _pid.MaxOutputRate = (maxPumpSpeed - minPumpSpeed) / 2.5; // units per second
                 _pid.SetpointRampRate = targetPressurePsi / 2.5; // psi per second
                 _pid.OutputFilterTimeConstant = 0.2;
+                // Derivative filter: prefer time-constant ~ Ts to 2*Ts
+                _pid.DerivativeFilterTimeConstant = Math.Max(dt, 2 * dt);
                 PidEvalDelegate liveEvaluator = async (parameters, evalCt) =>
                 {
                     double prevUpper = _pid.OutputUpperLimit;
@@ -1132,7 +1138,9 @@ namespace Puck.Services
                         int stepDir = 0;
                         double[] errors = new double[steps];
 
-                        DateTime prevTime = DateTime.UtcNow;
+                        long ticksPerSecond = System.Diagnostics.Stopwatch.Frequency;
+                        long targetTicks = (long)(dt * ticksPerSecond);
+                        long prevTicks = System.Diagnostics.Stopwatch.GetTimestamp() - targetTicks;
 
                         for (int i = 0; i < steps; i++)
                         {
@@ -1157,15 +1165,25 @@ namespace Puck.Services
                                 return new PidResult { Cost = double.MaxValue };
                             }
 
-                            var now = DateTime.UtcNow;
-                            double u = _pid.PID_iterate(sp, p.Value, now - prevTime);
-                            prevTime = now;
+                            long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                            long dtTicks = nowTicks - prevTicks;
+                            double dtSeconds = dtTicks > 0 ? (double)dtTicks / ticksPerSecond : dt;
+                            double u = _pid.PID_iterate(sp, p.Value, TimeSpan.FromSeconds(dtSeconds));
+                            prevTicks = nowTicks;
                             //not using _pid.OutputUpperLimit here because override during tuning
                             double clampedU = Math.Max(minPumpSpeed, Math.Min(maxPumpSpeed, u));
                             await ApplyPumpSpeedInternalAsync(clampedU, evalCt);
 
                             // wait for next sample
-                            await Task.Delay(TimeSpan.FromSeconds(dt), evalCt); 
+                            long loopEndTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                            long workTicks = loopEndTicks - nowTicks;
+                            long remainingTicks = targetTicks - workTicks;
+                            if (remainingTicks > 0)
+                            {
+                                int remainingMs = (int)Math.Max(0, (remainingTicks * 1000) / ticksPerSecond);
+                                if (remainingMs > 0)
+                                    await Task.Delay(remainingMs, evalCt);
+                            }
 
                             p = GetGroupHeadPressure();
                             if (!p.HasValue)

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics;
 
 
 namespace puck.Services.PID;
@@ -9,11 +10,18 @@ public class PidControlLoop : IDisposable
     private Task? _controlTask;
     private readonly SemaphoreSlim _lock;
     private readonly CancellationTokenSource _ctSrc;
+    private TimeSpan _targetPeriod = TimeSpan.FromMilliseconds(100);
 
     public PidControlLoop()
     {
         _lock = new SemaphoreSlim(1, 1);
         _ctSrc = new CancellationTokenSource();
+    }
+
+    public TimeSpan TargetPeriod
+    {
+        get => _targetPeriod;
+        set => _targetPeriod = value <= TimeSpan.Zero ? TimeSpan.FromMilliseconds(100) : value;
     }
 
     public async Task StartControlLoopAsync(
@@ -47,18 +55,29 @@ public class PidControlLoop : IDisposable
             {
                 using (var combinedCt = CancellationTokenSource.CreateLinkedTokenSource(ct, _ctSrc.Token))
                 {
-                    var currentTime = DateTime.UtcNow;
-                    var previousTime = currentTime - TimeSpan.FromMilliseconds(100);
+                    var targetPeriod = _targetPeriod;
+                    long ticksPerSecond = Stopwatch.Frequency;
+                    long targetTicks = (long)(targetPeriod.TotalSeconds * ticksPerSecond);
+                    long prevTicks = Stopwatch.GetTimestamp() - targetTicks; // seed with nominal period
 
                     while (!combinedCt.IsCancellationRequested)
                     {
+                        long loopStartTicks = Stopwatch.GetTimestamp();
+                        long dtTicks = loopStartTicks - prevTicks;
+                        double dtSeconds = dtTicks > 0 ? (double)dtTicks / ticksPerSecond : targetPeriod.TotalSeconds;
                         var processVar = getProcessValue();
-                        var output = pid.PID_iterate(setpoint, processVar, currentTime - previousTime);
+                        var output = pid.PID_iterate(setpoint, processVar, TimeSpan.FromSeconds(dtSeconds));
                         await actuate(output, combinedCt.Token);
 
-                        await Task.Delay(100, combinedCt.Token);
-                        previousTime = currentTime;
-                        currentTime = DateTime.UtcNow;
+                        long workTicks = Stopwatch.GetTimestamp() - loopStartTicks;
+                        long remainingTicks = targetTicks - workTicks;
+                        if (remainingTicks > 0)
+                        {
+                            int remainingMs = (int)Math.Max(0, (remainingTicks * 1000) / ticksPerSecond);
+                            if (remainingMs > 0)
+                                await Task.Delay(remainingMs, combinedCt.Token);
+                        }
+                        prevTicks = loopStartTicks;
                     }
                 }
             });
@@ -152,6 +171,13 @@ public class PID : IPID
     private double _lastFilteredOutput = 0.0;
     // Derivative filter alpha (0 < alpha < 1)
     private double _derivativeFilterAlpha;
+    // Optional derivative filter time constant (seconds; 0 disables and uses alpha)
+    private double _derivativeFilterTimeConstant = 0.0;
+    // Optional input low-pass filter (time constant in seconds; 0 disables)
+    private double _inputFilterTimeConstant = 0.0;
+    private double _lastFilteredProcessValue = double.NaN;
+    // Nominal sample period for upper clamping of dt
+    private double _tsNominal;
 
     /// <summary>
     /// PID Constructor
@@ -201,6 +227,7 @@ public class PID : IPID
         OutputUpperLimit = outputUpperLimit;
         OutputLowerLimit = outputLowerLimit;
         _tsMin = tsMin;
+        _tsNominal = tsMin;
         _proportionalSetpointWeight = proportionalSetpointWeight;
         // derivativeSetpointWeight not used (DoM).
         _maxOutputRate = maxOutputRate;
@@ -266,6 +293,16 @@ public class PID : IPID
     }
 
     /// <summary>
+    /// Derivative filter time constant (seconds). If > 0, overrides alpha and computes alpha = Ts/(Tau+Ts) per-iteration.
+    /// Ensures time constant is at least the sample period implicitly (alpha <= 0.5).
+    /// </summary>
+    public double DerivativeFilterTimeConstant
+    {
+        get => _derivativeFilterTimeConstant;
+        set => _derivativeFilterTimeConstant = value < 0 ? 0 : value;
+    }
+
+    /// <summary>
     /// Set the output rate limit (units/sec, 0 disables).
     /// </summary>
     public double MaxOutputRate { get => _maxOutputRate; set => _maxOutputRate = value; }
@@ -291,6 +328,20 @@ public class PID : IPID
     public double OutputFilterTimeConstant { get => _outputFilterTimeConstant; set => _outputFilterTimeConstant = value < 0 ? 0 : value; }
 
     /// <summary>
+    /// Optional input low-pass filter time constant in seconds. Set to 0 to disable.
+    /// </summary>
+    public double InputFilterTimeConstant { get => _inputFilterTimeConstant; set => _inputFilterTimeConstant = value < 0 ? 0 : value; }
+
+    /// <summary>
+    /// Set or get the nominal sample period used to cap dt (upper bound is 5x nominal).
+    /// </summary>
+    public double NominalSamplePeriod
+    {
+        get => _tsNominal;
+        set => _tsNominal = value > 0 ? value : _tsNominal;
+    }
+
+    /// <summary>
     /// PID iterator, call this function every sample period to get the current controller output.
     /// Implements advanced anti-windup, derivative filtering, setpoint ramping, feedforward, output rate limiting, integral separation, deadband, and diagnostics.
     /// </summary>
@@ -305,12 +356,12 @@ public class PID : IPID
     {
         lock (_lock)
         {
-            // Ensure the timespan is not too small or zero.
-            _samplePeriod = ts.TotalSeconds >= _tsMin ? ts.TotalSeconds : _tsMin;
-            if (_samplePeriod <= 0 || double.IsNaN(_samplePeriod) || double.IsInfinity(_samplePeriod))
-            {
-                _samplePeriod = 0.001; // Defensive: never zero or negative
-            }
+            // Compute sample period with floor and upper cap based on nominal Ts
+            double dt = ts.TotalSeconds;
+            if (dt <= 0 || double.IsNaN(dt) || double.IsInfinity(dt))
+                dt = _tsNominal > 0 ? _tsNominal : 0.001;
+            double upperCap = 5.0 * (_tsNominal > 0 ? _tsNominal : dt);
+            _samplePeriod = Math.Clamp(dt, _tsMin, upperCap);
 
             // Setpoint ramping
             double rampedSetpoint = setPoint;
@@ -322,9 +373,22 @@ public class PID : IPID
             }
             _lastSetpoint = rampedSetpoint;
 
+            // Optional input anti-aliasing (LPF) on measurement
+            double measured = processValue;
+            if (double.IsNaN(_lastFilteredProcessValue))
+                _lastFilteredProcessValue = measured;
+            if (_inputFilterTimeConstant > 0)
+            {
+                double measAlpha = _samplePeriod / (_inputFilterTimeConstant + _samplePeriod);
+                // Guard alpha to (0, 1)
+                measAlpha = Math.Max(1e-6, Math.Min(1 - 1e-6, measAlpha));
+                _lastFilteredProcessValue = _lastFilteredProcessValue + measAlpha * (measured - _lastFilteredProcessValue);
+                measured = _lastFilteredProcessValue;
+            }
+
             // Setpoint weighting for proportional and derivative terms
-            double proportionalError = _proportionalSetpointWeight * rampedSetpoint - processValue;
-            double error = rampedSetpoint - processValue;
+            double proportionalError = _proportionalSetpointWeight * rampedSetpoint - measured;
+            double error = rampedSetpoint - measured;
             LastError = error;
 
             // Deadband flag: if true, we will skip integral and derivative state updates
@@ -342,22 +406,38 @@ public class PID : IPID
             double rawDerivative;
             if (isFirstCall)
             {
-                _lastProcessValue = processValue;
+                _lastProcessValue = measured;
                 _lastDerivative = 0;
                 rawDerivative = 0;
             }
             else
             {
-                rawDerivative = -(processValue - _lastProcessValue) / _samplePeriod;
+                rawDerivative = -(measured - _lastProcessValue) / _samplePeriod;
                 if (double.IsNaN(rawDerivative) || double.IsInfinity(rawDerivative))
                 {
                     // Defensive: log and set to 0
-                    System.Diagnostics.Debug.WriteLine($"PID: NaN derivative detected. processValue={processValue}, _lastProcessValue={_lastProcessValue}, _samplePeriod={_samplePeriod}");
+                    System.Diagnostics.Debug.WriteLine($"PID: NaN derivative detected. processValue={measured}, _lastProcessValue={_lastProcessValue}, _samplePeriod={_samplePeriod}");
                     rawDerivative = 0;
                 }
             }
-            // Derivative filter using configured alpha
-            double derivativeAlpha = _derivativeFilterAlpha;
+            // Derivative filter: prefer time-constant if configured; else use alpha (guarded)
+            double derivativeAlpha;
+            if (_derivativeFilterTimeConstant > 0)
+            {
+                // Ensure Tau >= Ts implicitly by clamping alpha <= 0.5
+                derivativeAlpha = _samplePeriod / (_derivativeFilterTimeConstant + _samplePeriod);
+                derivativeAlpha = Math.Max(1e-6, Math.Min(0.5, derivativeAlpha));
+            }
+            else
+            {
+                derivativeAlpha = _derivativeFilterAlpha;
+                if (!(derivativeAlpha > 0 && derivativeAlpha < 1))
+                {
+                    // Fallback to N-based alpha if alpha not configured properly
+                    derivativeAlpha = _samplePeriod / (1.0 / Math.Max(N, double.Epsilon) + _samplePeriod);
+                }
+                derivativeAlpha = Math.Max(1e-6, Math.Min(0.5, derivativeAlpha));
+            }
             double filteredDerivative = inDeadband
                 ? _lastDerivative
                 : _lastDerivative + derivativeAlpha * (rawDerivative - _lastDerivative);
@@ -430,7 +510,7 @@ public class PID : IPID
             }
 
             // Save for next iteration
-            _lastProcessValue = processValue; // keep measurement history even in deadband
+            _lastProcessValue = measured; // keep measurement history even in deadband
             _lastOutput = output;
 
             // Instability alarm: detect oscillation or excessive output
