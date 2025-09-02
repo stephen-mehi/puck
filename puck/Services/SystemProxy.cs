@@ -1144,10 +1144,6 @@ namespace Puck.Services
 
                         for (int i = 0; i < steps; i++)
                         {
-                            //TODO: DELETE. ONLY FLIPPING THE VALVE TO INDICATE STARTING TEST
-                            await SetBackFlushValveStateClosedInternalAsync(ct);
-                            await SetBackFlushValveStateOpenInternalAsync(ct);
-
                             if (evalCt.IsCancellationRequested)
                             {
                                 _logger.LogWarning($"Eval was cancelled");
