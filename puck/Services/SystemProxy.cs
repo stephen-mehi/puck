@@ -1118,6 +1118,9 @@ namespace Puck.Services
                     double prevLower = _pid.OutputLowerLimit;
                     try
                     {
+                        await SetBackFlushValveStateClosedInternalAsync(ct);
+                        await SetBackFlushValveStateOpenInternalAsync(ct);
+
                         // Apply candidate gains and reset controller state
                         _pid.SetGains(parameters.Kp, parameters.Ki, parameters.Kd);
                         _pid.ResetController();
