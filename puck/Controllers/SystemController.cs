@@ -158,7 +158,7 @@ public class SystemController : ControllerBase
     public async Task<IActionResult> PostAutoTuneLive([FromBody] AutotuneRequest req, CancellationToken ct = default)
     {
         var dt = req?.Dt ?? .1;
-        var steps = req?.Steps ?? 800;
+        var steps = req?.Steps ?? 200;
         var maxSafePressurePsi = req?.MaxSafePressurePsi ?? 65.0;
         var targetPressurePsi = req?.TargetPressurePsi ?? 40.0;
         var maxPumpSpeed = req?.MaxPumpSpeed ?? 7.0;

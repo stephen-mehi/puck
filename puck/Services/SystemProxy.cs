@@ -1118,9 +1118,6 @@ namespace Puck.Services
                     double prevLower = _pid.OutputLowerLimit;
                     try
                     {
-                        await SetBackFlushValveStateClosedInternalAsync(ct);
-                        await SetBackFlushValveStateOpenInternalAsync(ct);
-
                         // Apply candidate gains and reset controller state
                         _pid.SetGains(parameters.Kp, parameters.Ki, parameters.Kd);
                         _pid.ResetController();
@@ -1147,6 +1144,10 @@ namespace Puck.Services
 
                         for (int i = 0; i < steps; i++)
                         {
+                            //TODO: DELETE. ONLY FLIPPING THE VALVE TO INDICATE STARTING TEST
+                            await SetBackFlushValveStateClosedInternalAsync(ct);
+                            await SetBackFlushValveStateOpenInternalAsync(ct);
+
                             if (evalCt.IsCancellationRequested)
                             {
                                 _logger.LogWarning($"Eval was cancelled");
