@@ -506,6 +506,35 @@ namespace PhoenixInline.Simple
             }
         }
 
+        public async Task<bool> IsConnectedAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                // Prefer the driver's connectivity check if available
+                if (_pac != null)
+                {
+                    var ok = await _pac.IsConnectedAsync(ct).ConfigureAwait(false);
+                    PublishConnection(ok);
+                    return ok;
+                }
+
+                // Otherwise, if we already have a master, validate it's still responsive
+                if (_master != null && await IsMasterConnectedAsync(_master, ct).ConfigureAwait(false))
+                {
+                    PublishConnection(true);
+                    return true;
+                }
+
+                PublishConnection(false);
+                return false;
+            }
+            catch
+            {
+                PublishConnection(false);
+                return false;
+            }
+        }
+
         // ===== 1) New fields (add inside LinearInlineIoBus) =====
 
         // Miss -> null policy and analog deadband (default values; can be overridden per StartScanning)
